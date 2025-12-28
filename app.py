@@ -68,11 +68,111 @@ EXPRESSIONS_DARIJA = {
 
 # Prix enseignes pour comparateur
 PRIX_ENSEIGNES = {
-    "Lidl": {"poulet_kg": 4.80, "boeuf_kg": 11.20, "tomates_kg": 2.10, "oignons_kg": 0.95},
-    "Aldi": {"poulet_kg": 4.90, "boeuf_kg": 11.50, "tomates_kg": 2.20, "oignons_kg": 0.99},
-    "Leclerc": {"poulet_kg": 5.50, "boeuf_kg": 12.90, "tomates_kg": 2.80, "oignons_kg": 1.20},
-    "Auchan": {"poulet_kg": 5.80, "boeuf_kg": 12.80, "tomates_kg": 2.90, "oignons_kg": 1.30},
-    "Carrefour": {"poulet_kg": 6.20, "boeuf_kg": 13.50, "tomates_kg": 3.10, "oignons_kg": 1.50}
+    "Lidl": {
+        # Viandes
+        "poulet_kg": 4.80, "boeuf_kg": 11.20, "viande_mouton_kg": 12.50, "merguez_kg": 8.90,
+        "viande_hachee_kg": 9.20, "agneau_kg": 13.50, "porc_kg": 7.80,
+        # Légumes
+        "tomates_kg": 2.10, "oignons_kg": 0.95, "oignon_kg": 0.95, "poivrons_kg": 2.40,
+        "courgettes_kg": 1.80, "aubergines_kg": 2.20, "carottes_kg": 1.10, "pommes_de_terre_kg": 1.50,
+        "tomates_cerises_kg": 3.20, "salade_kg": 1.80, "celeri_kg": 2.50, "haricots_verts_kg": 3.50,
+        # Légumineuses & céréales
+        "lentilles_kg": 2.80, "pois_chiches_kg": 2.90, "riz_kg": 1.80, "pates_kg": 1.50,
+        "farine_kg": 0.90, "couscous_kg": 2.20, "semoule_kg": 1.90,
+        # Herbes & épices
+        "coriandre_kg": 8.50, "persil_kg": 8.00, "menthe_kg": 9.00, "basilic_kg": 10.50,
+        # Produits laitiers & oeufs
+        "oeufs_unite": 0.25, "fromage_kg": 12.50, "creme_fraiche_kg": 4.80, "beurre_kg": 8.90,
+        "lait_litre": 0.95, "yaourt_unite": 0.40,
+        # Poissons
+        "saumon_kg": 16.50, "cabillaud_kg": 12.80, "sardines_kg": 6.50,
+        # Autres
+        "huile_litre": 4.20, "olives_kg": 6.80, "citrons_kg": 2.50
+    },
+    "Aldi": {
+        # Viandes
+        "poulet_kg": 4.90, "boeuf_kg": 11.50, "viande_mouton_kg": 12.80, "merguez_kg": 9.20,
+        "viande_hachee_kg": 9.50, "agneau_kg": 13.80, "porc_kg": 8.10,
+        # Légumes
+        "tomates_kg": 2.20, "oignons_kg": 0.99, "oignon_kg": 0.99, "poivrons_kg": 2.50,
+        "courgettes_kg": 1.90, "aubergines_kg": 2.30, "carottes_kg": 1.15, "pommes_de_terre_kg": 1.55,
+        "tomates_cerises_kg": 3.30, "salade_kg": 1.85, "celeri_kg": 2.60, "haricots_verts_kg": 3.60,
+        # Légumineuses & céréales
+        "lentilles_kg": 2.90, "pois_chiches_kg": 3.00, "riz_kg": 1.85, "pates_kg": 1.55,
+        "farine_kg": 0.95, "couscous_kg": 2.30, "semoule_kg": 1.95,
+        # Herbes & épices
+        "coriandre_kg": 8.80, "persil_kg": 8.30, "menthe_kg": 9.30, "basilic_kg": 10.80,
+        # Produits laitiers & oeufs
+        "oeufs_unite": 0.26, "fromage_kg": 12.80, "creme_fraiche_kg": 4.90, "beurre_kg": 9.10,
+        "lait_litre": 0.98, "yaourt_unite": 0.42,
+        # Poissons
+        "saumon_kg": 16.90, "cabillaud_kg": 13.10, "sardines_kg": 6.70,
+        # Autres
+        "huile_litre": 4.30, "olives_kg": 7.00, "citrons_kg": 2.60
+    },
+    "Leclerc": {
+        # Viandes
+        "poulet_kg": 5.50, "boeuf_kg": 12.90, "viande_mouton_kg": 14.20, "merguez_kg": 10.50,
+        "viande_hachee_kg": 10.80, "agneau_kg": 15.20, "porc_kg": 9.20,
+        # Légumes
+        "tomates_kg": 2.80, "oignons_kg": 1.20, "oignon_kg": 1.20, "poivrons_kg": 3.10,
+        "courgettes_kg": 2.40, "aubergines_kg": 2.90, "carottes_kg": 1.45, "pommes_de_terre_kg": 1.85,
+        "tomates_cerises_kg": 4.10, "salade_kg": 2.30, "celeri_kg": 3.20, "haricots_verts_kg": 4.30,
+        # Légumineuses & céréales
+        "lentilles_kg": 3.50, "pois_chiches_kg": 3.60, "riz_kg": 2.30, "pates_kg": 1.90,
+        "farine_kg": 1.20, "couscous_kg": 2.80, "semoule_kg": 2.40,
+        # Herbes & épices
+        "coriandre_kg": 10.50, "persil_kg": 10.00, "menthe_kg": 11.00, "basilic_kg": 12.80,
+        # Produits laitiers & oeufs
+        "oeufs_unite": 0.32, "fromage_kg": 14.50, "creme_fraiche_kg": 5.80, "beurre_kg": 10.50,
+        "lait_litre": 1.15, "yaourt_unite": 0.50,
+        # Poissons
+        "saumon_kg": 19.50, "cabillaud_kg": 15.20, "sardines_kg": 7.80,
+        # Autres
+        "huile_litre": 5.10, "olives_kg": 8.50, "citrons_kg": 3.10
+    },
+    "Auchan": {
+        # Viandes
+        "poulet_kg": 5.80, "boeuf_kg": 12.80, "viande_mouton_kg": 14.50, "merguez_kg": 10.80,
+        "viande_hachee_kg": 11.00, "agneau_kg": 15.50, "porc_kg": 9.50,
+        # Légumes
+        "tomates_kg": 2.90, "oignons_kg": 1.30, "oignon_kg": 1.30, "poivrons_kg": 3.20,
+        "courgettes_kg": 2.50, "aubergines_kg": 3.00, "carottes_kg": 1.50, "pommes_de_terre_kg": 1.90,
+        "tomates_cerises_kg": 4.20, "salade_kg": 2.40, "celeri_kg": 3.30, "haricots_verts_kg": 4.40,
+        # Légumineuses & céréales
+        "lentilles_kg": 3.60, "pois_chiches_kg": 3.70, "riz_kg": 2.40, "pates_kg": 1.95,
+        "farine_kg": 1.25, "couscous_kg": 2.90, "semoule_kg": 2.50,
+        # Herbes & épices
+        "coriandre_kg": 10.80, "persil_kg": 10.30, "menthe_kg": 11.30, "basilic_kg": 13.00,
+        # Produits laitiers & oeufs
+        "oeufs_unite": 0.33, "fromage_kg": 14.80, "creme_fraiche_kg": 5.90, "beurre_kg": 10.80,
+        "lait_litre": 1.18, "yaourt_unite": 0.52,
+        # Poissons
+        "saumon_kg": 19.80, "cabillaud_kg": 15.50, "sardines_kg": 8.00,
+        # Autres
+        "huile_litre": 5.20, "olives_kg": 8.80, "citrons_kg": 3.20
+    },
+    "Carrefour": {
+        # Viandes
+        "poulet_kg": 6.20, "boeuf_kg": 13.50, "viande_mouton_kg": 15.00, "merguez_kg": 11.20,
+        "viande_hachee_kg": 11.50, "agneau_kg": 16.00, "porc_kg": 9.80,
+        # Légumes
+        "tomates_kg": 3.10, "oignons_kg": 1.50, "oignon_kg": 1.50, "poivrons_kg": 3.50,
+        "courgettes_kg": 2.70, "aubergines_kg": 3.20, "carottes_kg": 1.60, "pommes_de_terre_kg": 2.10,
+        "tomates_cerises_kg": 4.50, "salade_kg": 2.60, "celeri_kg": 3.50, "haricots_verts_kg": 4.70,
+        # Légumineuses & céréales
+        "lentilles_kg": 3.80, "pois_chiches_kg": 3.90, "riz_kg": 2.60, "pates_kg": 2.10,
+        "farine_kg": 1.35, "couscous_kg": 3.10, "semoule_kg": 2.70,
+        # Herbes & épices
+        "coriandre_kg": 11.50, "persil_kg": 11.00, "menthe_kg": 12.00, "basilic_kg": 13.80,
+        # Produits laitiers & oeufs
+        "oeufs_unite": 0.35, "fromage_kg": 15.50, "creme_fraiche_kg": 6.20, "beurre_kg": 11.50,
+        "lait_litre": 1.25, "yaourt_unite": 0.55,
+        # Poissons
+        "saumon_kg": 21.00, "cabillaud_kg": 16.50, "sardines_kg": 8.50,
+        # Autres
+        "huile_litre": 5.50, "olives_kg": 9.50, "citrons_kg": 3.50
+    }
 }
 
 # Liens GPS enseignes
@@ -3193,6 +3293,36 @@ def get_professional_css():
         float: left;
         clear: both;
         box-shadow: 0 5px 15px rgba(255, 107, 53, 0.3);
+    }
+    
+    /* BOÎTE ÉTAPES CUISINE */
+    .etape-box {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 15px;
+        font-size: 20px;
+        text-align: center;
+        margin: 20px 0;
+        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+    }
+    
+    .etape-box h2 {
+        color: white !important;
+        font-size: 28px;
+        margin-bottom: 15px;
+    }
+    
+    .etape-box h3 {
+        color: #FFC837;
+        font-size: 24px;
+        margin: 10px 0;
+    }
+    
+    .etape-box p {
+        font-size: 18px;
+        line-height: 1.6;
+        margin: 10px 0;
     }
     
     /* RESPONSIF */
