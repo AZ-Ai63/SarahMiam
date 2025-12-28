@@ -1,19 +1,43 @@
 """
 🍽️ SARAH'MIAM - Assistant Culinaire Bi-culturel France-Maroc
-Version: 2.0 COMPLÈTE
+Version: 3.0 FINALE
 Auteur: Abdel
-Date: 26 Décembre 2025
+Date: 28 Décembre 2025
 
-FONCTIONNALITÉS:
+FONCTIONNALITÉS COMPLÈTES:
 - 40 recettes ultra-détaillées (20 FR + 20 MA)
 - Génération IA illimitée via Groq
-- Budget strict par assiette
-- Anti-gaspi via photo frigo
-- Transmission culturelle
+- Géolocalisation automatique (HTML5 + IP + Manuel)
+- Météo contextualisée avec suggestions
+- Gestion allergies
+- Vérification ingrédients
+- Mode groupe (multiplication portions)
+- Suggestions intelligentes (budget/temps/niveau)
 - Détection stress vocal
-- Suggestions météo
+- Scan frigo photo (Groq Vision)
+- Timer cuisine
+- Conversions automatiques
 - Code-switching FR/Darija naturel
+- Vocal main-libre (Whisper + TTS)
+- Mode cuisine pas-à-pas
+- Comparateur prix 5 enseignes
+- GPS enseignes
 """
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
+import streamlit as st
+import os
+import json
+import re
+import base64
+from datetime import datetime
+from groq import Groq
+from audio_recorder_streamlit import audio_recorder
+import tempfile
+import requests
 
 # Charger .env automatiquement
 try:
@@ -22,24 +46,30 @@ try:
 except ImportError:
     pass
 
-import streamlit as st
-import os
-from groq import Groq
-from datetime import datetime
-import hashlib
-from audio_recorder_streamlit import audio_recorder
-import tempfile
-import requests
-
 # =============================================================================
-# CONFIGURATION GROQ API
+# CONFIGURATION PAGE STREAMLIT (DOIT ÊTRE EN PREMIER)
 # =============================================================================
 
-# Lire depuis Streamlit secrets
+st.set_page_config(
+    page_title="Sarah'Miam - Chef Personnel",
+    page_icon="🍽️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# =============================================================================
+# CONFIGURATION API
+# =============================================================================
+
 try:
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
     OPENWEATHER_API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
 except:
+    # Fallback pour développement local
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
+
+if not GROQ_API_KEY:
     st.error("⚠️ GROQ_API_KEY manquant! Crée le fichier .streamlit/secrets.toml")
     st.stop()
 
@@ -49,7 +79,23 @@ client = Groq(api_key=GROQ_API_KEY)
 # CONSTANTES
 # =============================================================================
 
-BUDGET_MAX_PAR_ASSIETTE = 3.0  # euros
+BUDGET_MAX_PAR_ASSIETTE = 5.0  # euros
+
+# Liste des allergènes courants
+ALLERGENES = {
+    "gluten": ["farine", "pates", "pain", "couscous", "semoule", "blé"],
+    "lactose": ["lait", "creme", "beurre", "fromage", "yaourt"],
+    "arachides": ["cacahuete", "arachide"],
+    "fruits_a_coque": ["amande", "noix", "noisette", "pistache"],
+    "oeufs": ["oeuf", "jaune_oeuf"],
+    "poisson": ["saumon", "cabillaud", "thon", "sardine", "anchois", "poisson"],
+    "crustaces": ["crevette", "crabe", "homard"],
+    "soja": ["soja", "tofu"],
+    "celeri": ["celeri"],
+    "moutarde": ["moutarde"],
+    "sesame": ["sesame"],
+    "sulfites": ["vin", "vinaigre"]
+}
 
 # Dictionnaire Darija
 DICTIONNAIRE_DARIJA = {
@@ -61,116 +107,99 @@ DICTIONNAIRE_DARIJA = {
 }
 
 EXPRESSIONS_DARIJA = {
-    "bienvenue": "Marhaba bik !", "bon_appetit": "Bsaha !",
-    "delicieux": "Benin bezzaf !", "commence": "Yallah, nwellou !",
-    "regarde": "Chouf !", "facile": "Sahel !", "excellent": "Mezyan bezzaf !"
+    "bienvenue": "Marhaba bik!",
+    "bon_appetit": "Bsaha!",
+    "delicieux": "Benin bezzaf!",
+    "commence": "Yallah, nwellou!",
+    "regarde": "Chouf!",
+    "facile": "Sahel!",
+    "excellent": "Mezyan bezzaf!",
+    "bravo": "Tbarkallah!",
+    "courage": "Allah y3awnek!"
+}
+
+# Conversions culinaires
+CONVERSIONS = {
+    "tasse_ml": 250,
+    "cuillere_soupe_ml": 15,
+    "cuillere_cafe_ml": 5,
+    "tasse_farine_g": 125,
+    "tasse_sucre_g": 200,
+    "tasse_riz_g": 185,
+    "oz_g": 28.35,
+    "lb_kg": 0.453592
 }
 
 # Prix enseignes pour comparateur
 PRIX_ENSEIGNES = {
     "Lidl": {
-        # Viandes
         "poulet_kg": 4.80, "boeuf_kg": 11.20, "viande_mouton_kg": 12.50, "merguez_kg": 8.90,
         "viande_hachee_kg": 9.20, "agneau_kg": 13.50, "porc_kg": 7.80,
-        # Légumes
         "tomates_kg": 2.10, "oignons_kg": 0.95, "oignon_kg": 0.95, "poivrons_kg": 2.40,
         "courgettes_kg": 1.80, "aubergines_kg": 2.20, "carottes_kg": 1.10, "pommes_de_terre_kg": 1.50,
         "tomates_cerises_kg": 3.20, "salade_kg": 1.80, "celeri_kg": 2.50, "haricots_verts_kg": 3.50,
-        # Légumineuses & céréales
         "lentilles_kg": 2.80, "pois_chiches_kg": 2.90, "riz_kg": 1.80, "pates_kg": 1.50,
         "farine_kg": 0.90, "couscous_kg": 2.20, "semoule_kg": 1.90,
-        # Herbes & épices
         "coriandre_kg": 8.50, "persil_kg": 8.00, "menthe_kg": 9.00, "basilic_kg": 10.50,
-        # Produits laitiers & oeufs
         "oeufs_unite": 0.25, "fromage_kg": 12.50, "creme_fraiche_kg": 4.80, "beurre_kg": 8.90,
         "lait_litre": 0.95, "yaourt_unite": 0.40,
-        # Poissons
         "saumon_kg": 16.50, "cabillaud_kg": 12.80, "sardines_kg": 6.50,
-        # Autres
         "huile_litre": 4.20, "olives_kg": 6.80, "citrons_kg": 2.50
     },
     "Aldi": {
-        # Viandes
         "poulet_kg": 4.90, "boeuf_kg": 11.50, "viande_mouton_kg": 12.80, "merguez_kg": 9.20,
         "viande_hachee_kg": 9.50, "agneau_kg": 13.80, "porc_kg": 8.10,
-        # Légumes
         "tomates_kg": 2.20, "oignons_kg": 0.99, "oignon_kg": 0.99, "poivrons_kg": 2.50,
         "courgettes_kg": 1.90, "aubergines_kg": 2.30, "carottes_kg": 1.15, "pommes_de_terre_kg": 1.55,
         "tomates_cerises_kg": 3.30, "salade_kg": 1.85, "celeri_kg": 2.60, "haricots_verts_kg": 3.60,
-        # Légumineuses & céréales
         "lentilles_kg": 2.90, "pois_chiches_kg": 3.00, "riz_kg": 1.85, "pates_kg": 1.55,
         "farine_kg": 0.95, "couscous_kg": 2.30, "semoule_kg": 1.95,
-        # Herbes & épices
         "coriandre_kg": 8.80, "persil_kg": 8.30, "menthe_kg": 9.30, "basilic_kg": 10.80,
-        # Produits laitiers & oeufs
         "oeufs_unite": 0.26, "fromage_kg": 12.80, "creme_fraiche_kg": 4.90, "beurre_kg": 9.10,
         "lait_litre": 0.98, "yaourt_unite": 0.42,
-        # Poissons
         "saumon_kg": 16.90, "cabillaud_kg": 13.10, "sardines_kg": 6.70,
-        # Autres
         "huile_litre": 4.30, "olives_kg": 7.00, "citrons_kg": 2.60
     },
     "Leclerc": {
-        # Viandes
         "poulet_kg": 5.50, "boeuf_kg": 12.90, "viande_mouton_kg": 14.20, "merguez_kg": 10.50,
         "viande_hachee_kg": 10.80, "agneau_kg": 15.20, "porc_kg": 9.20,
-        # Légumes
         "tomates_kg": 2.80, "oignons_kg": 1.20, "oignon_kg": 1.20, "poivrons_kg": 3.10,
         "courgettes_kg": 2.40, "aubergines_kg": 2.90, "carottes_kg": 1.45, "pommes_de_terre_kg": 1.85,
         "tomates_cerises_kg": 4.10, "salade_kg": 2.30, "celeri_kg": 3.20, "haricots_verts_kg": 4.30,
-        # Légumineuses & céréales
         "lentilles_kg": 3.50, "pois_chiches_kg": 3.60, "riz_kg": 2.30, "pates_kg": 1.90,
         "farine_kg": 1.20, "couscous_kg": 2.80, "semoule_kg": 2.40,
-        # Herbes & épices
         "coriandre_kg": 10.50, "persil_kg": 10.00, "menthe_kg": 11.00, "basilic_kg": 12.80,
-        # Produits laitiers & oeufs
         "oeufs_unite": 0.32, "fromage_kg": 14.50, "creme_fraiche_kg": 5.80, "beurre_kg": 10.50,
         "lait_litre": 1.15, "yaourt_unite": 0.50,
-        # Poissons
         "saumon_kg": 19.50, "cabillaud_kg": 15.20, "sardines_kg": 7.80,
-        # Autres
         "huile_litre": 5.10, "olives_kg": 8.50, "citrons_kg": 3.10
     },
     "Auchan": {
-        # Viandes
         "poulet_kg": 5.80, "boeuf_kg": 12.80, "viande_mouton_kg": 14.50, "merguez_kg": 10.80,
         "viande_hachee_kg": 11.00, "agneau_kg": 15.50, "porc_kg": 9.50,
-        # Légumes
         "tomates_kg": 2.90, "oignons_kg": 1.30, "oignon_kg": 1.30, "poivrons_kg": 3.20,
         "courgettes_kg": 2.50, "aubergines_kg": 3.00, "carottes_kg": 1.50, "pommes_de_terre_kg": 1.90,
         "tomates_cerises_kg": 4.20, "salade_kg": 2.40, "celeri_kg": 3.30, "haricots_verts_kg": 4.40,
-        # Légumineuses & céréales
         "lentilles_kg": 3.60, "pois_chiches_kg": 3.70, "riz_kg": 2.40, "pates_kg": 1.95,
         "farine_kg": 1.25, "couscous_kg": 2.90, "semoule_kg": 2.50,
-        # Herbes & épices
         "coriandre_kg": 10.80, "persil_kg": 10.30, "menthe_kg": 11.30, "basilic_kg": 13.00,
-        # Produits laitiers & oeufs
         "oeufs_unite": 0.33, "fromage_kg": 14.80, "creme_fraiche_kg": 5.90, "beurre_kg": 10.80,
         "lait_litre": 1.18, "yaourt_unite": 0.52,
-        # Poissons
         "saumon_kg": 19.80, "cabillaud_kg": 15.50, "sardines_kg": 8.00,
-        # Autres
         "huile_litre": 5.20, "olives_kg": 8.80, "citrons_kg": 3.20
     },
     "Carrefour": {
-        # Viandes
         "poulet_kg": 6.20, "boeuf_kg": 13.50, "viande_mouton_kg": 15.00, "merguez_kg": 11.20,
         "viande_hachee_kg": 11.50, "agneau_kg": 16.00, "porc_kg": 9.80,
-        # Légumes
         "tomates_kg": 3.10, "oignons_kg": 1.50, "oignon_kg": 1.50, "poivrons_kg": 3.50,
         "courgettes_kg": 2.70, "aubergines_kg": 3.20, "carottes_kg": 1.60, "pommes_de_terre_kg": 2.10,
         "tomates_cerises_kg": 4.50, "salade_kg": 2.60, "celeri_kg": 3.50, "haricots_verts_kg": 4.70,
-        # Légumineuses & céréales
         "lentilles_kg": 3.80, "pois_chiches_kg": 3.90, "riz_kg": 2.60, "pates_kg": 2.10,
         "farine_kg": 1.35, "couscous_kg": 3.10, "semoule_kg": 2.70,
-        # Herbes & épices
         "coriandre_kg": 11.50, "persil_kg": 11.00, "menthe_kg": 12.00, "basilic_kg": 13.80,
-        # Produits laitiers & oeufs
         "oeufs_unite": 0.35, "fromage_kg": 15.50, "creme_fraiche_kg": 6.20, "beurre_kg": 11.50,
         "lait_litre": 1.25, "yaourt_unite": 0.55,
-        # Poissons
         "saumon_kg": 21.00, "cabillaud_kg": 16.50, "sardines_kg": 8.50,
-        # Autres
         "huile_litre": 5.50, "olives_kg": 9.50, "citrons_kg": 3.50
     }
 }
@@ -2475,142 +2504,762 @@ RECETTES_DETAILLEES = {
             }
         ],
         "anecdote": "La cuisson vapeur préserve tous les nutriments et la texture délicate du poisson. C'est la cuisson santé par excellence!"
+    },
+    
+    # ========== 5 RECETTES SUPPLÉMENTAIRES ==========
+    
+    "Tajine Kefta aux Œufs": {
+        "pays": "🇲🇦 Maroc",
+        "categorie": "Plat principal",
+        "budget_assiette": 2.20,
+        "duree_min": 35,
+        "difficulte": "Facile",
+        "saison": "Toute",
+        "darija": "طاجين كفتة بالبيض - Tajine kefta b lbid!",
+        "ingredients": {
+            "viande_hachee_kg": 0.5,
+            "tomates_kg": 0.4,
+            "oignon_kg": 0.15,
+            "oeuf_kg": 0.2,
+            "persil_kg": 0.03,
+            "cumin_kg": 0.01
+        },
+        "etapes": [
+            {
+                "num": 1,
+                "titre": "🥩 Préparation des boulettes (10 min)",
+                "description": "Mélanger la viande hachée avec oignon râpé, persil haché, cumin, paprika, sel et poivre. Former des boulettes de la taille d'une noix.",
+                "temperature": "Température ambiante",
+                "duree": "10 minutes",
+                "astuce": "Des petites boulettes cuisent plus vite!"
+            },
+            {
+                "num": 2,
+                "titre": "🍅 Préparation de la sauce (10 min)",
+                "description": "Dans le tajine ou une poêle, faire revenir l'oignon émincé. Ajouter les tomates pelées concassées, sel, poivre, cumin, paprika. Laisser mijoter.",
+                "temperature": "Feu moyen",
+                "duree": "10 minutes",
+                "astuce": "La sauce doit épaissir!"
+            },
+            {
+                "num": 3,
+                "titre": "🥘 Cuisson des keftas (10 min)",
+                "description": "Déposer les boulettes dans la sauce tomate. Couvrir et laisser cuire à feu doux.",
+                "temperature": "Feu doux",
+                "duree": "10 minutes",
+                "astuce": "Ne pas trop remuer pour garder les boulettes entières!"
+            },
+            {
+                "num": 4,
+                "titre": "🥚 Ajout des œufs (5 min)",
+                "description": "Créer des petits puits dans la sauce. Casser un œuf dans chaque puits. Couvrir et cuire jusqu'à ce que les blancs soient pris mais les jaunes encore coulants.",
+                "temperature": "Feu doux",
+                "duree": "5 minutes",
+                "astuce": "Jaunes coulants, c'est meilleur!"
+            },
+            {
+                "num": 5,
+                "titre": "🍽️ Service",
+                "description": "Servir directement dans le tajine avec du pain marocain pour saucer.",
+                "temperature": "Très chaud",
+                "duree": "Immédiat",
+                "astuce": "On trempe le pain dans le jaune, un délice!"
+            }
+        ],
+        "anecdote": "Ce tajine est un classique du dîner familial marocain. Simple, rapide et tout le monde l'adore!"
+    },
+    
+    "Crêpes Suzette": {
+        "pays": "🇫🇷 France",
+        "categorie": "Dessert",
+        "budget_assiette": 2.00,
+        "duree_min": 40,
+        "difficulte": "Moyen",
+        "saison": "Toute",
+        "ingredients": {
+            "farine_kg": 0.125,
+            "oeuf_kg": 0.1,
+            "lait_kg": 0.25,
+            "beurre_kg": 0.1,
+            "sucre_kg": 0.08,
+            "orange_kg": 0.3
+        },
+        "etapes": [
+            {
+                "num": 1,
+                "titre": "🥣 Pâte à crêpes (10 min + repos)",
+                "description": "Mélanger farine, œufs, lait et une pincée de sel. Laisser reposer 30 min minimum.",
+                "temperature": "Température ambiante",
+                "duree": "10 minutes + repos",
+                "astuce": "Pâte sans grumeaux = crêpes fines!"
+            },
+            {
+                "num": 2,
+                "titre": "🍳 Cuisson des crêpes (15 min)",
+                "description": "Dans une poêle beurrée bien chaude, verser une louche de pâte. Cuire 1-2 min de chaque côté.",
+                "temperature": "Feu vif",
+                "duree": "15 minutes",
+                "astuce": "Crêpes fines et dorées!"
+            },
+            {
+                "num": 3,
+                "titre": "🍊 Beurre d'orange (5 min)",
+                "description": "Faire fondre le beurre avec le sucre. Ajouter le zeste et le jus des oranges. Faire caraméliser légèrement.",
+                "temperature": "Feu moyen",
+                "duree": "5 minutes",
+                "astuce": "Le beurre doit mousser et devenir ambré!"
+            },
+            {
+                "num": 4,
+                "titre": "🔥 Flambage (2 min)",
+                "description": "Plier les crêpes en quatre, les disposer dans la sauce. Ajouter un peu de Grand Marnier et flamber.",
+                "temperature": "Feu vif",
+                "duree": "2 minutes",
+                "astuce": "Attention aux flammes! Spectaculaire!"
+            },
+            {
+                "num": 5,
+                "titre": "🍽️ Service",
+                "description": "Servir immédiatement 2 crêpes par personne, nappées de sauce à l'orange.",
+                "temperature": "Chaud",
+                "duree": "Immédiat",
+                "astuce": "Un dessert de restaurant à la maison!"
+            }
+        ],
+        "anecdote": "Les Crêpes Suzette auraient été inventées par accident en 1895 au Café de Paris à Monte-Carlo, pour le Prince de Galles!"
+    },
+    
+    "Mhancha aux Amandes": {
+        "pays": "🇲🇦 Maroc",
+        "categorie": "Dessert",
+        "budget_assiette": 2.80,
+        "duree_min": 60,
+        "difficulte": "Difficile",
+        "saison": "Toute",
+        "darija": "المحنشة - Mhancha dial les fêtes!",
+        "ingredients": {
+            "amandes_kg": 0.3,
+            "sucre_kg": 0.15,
+            "feuilles_brick_kg": 0.2,
+            "beurre_kg": 0.1,
+            "miel_kg": 0.1,
+            "eau_fleur_oranger_kg": 0.02
+        },
+        "etapes": [
+            {
+                "num": 1,
+                "titre": "🥜 Pâte d'amandes (15 min)",
+                "description": "Mixer les amandes avec le sucre, l'eau de fleur d'oranger et un peu de beurre fondu jusqu'à obtenir une pâte.",
+                "temperature": "Température ambiante",
+                "duree": "15 minutes",
+                "astuce": "Pas trop fine, garder du croquant!"
+            },
+            {
+                "num": 2,
+                "titre": "📜 Montage des boudins (15 min)",
+                "description": "Étaler la pâte d'amandes en boudin sur chaque feuille de brick beurrée. Rouler serré pour former des cigares.",
+                "temperature": "Température ambiante",
+                "duree": "15 minutes",
+                "astuce": "Bien serrer pour que ça tienne!"
+            },
+            {
+                "num": 3,
+                "titre": "🐍 Formation du serpent (10 min)",
+                "description": "Dans un plat rond beurré, enrouler le premier cigare en spirale au centre, puis ajouter les autres bout à bout pour former un serpent enroulé.",
+                "temperature": "Température ambiante",
+                "duree": "10 minutes",
+                "astuce": "C'est cette forme qui donne le nom mhancha (serpent)!"
+            },
+            {
+                "num": 4,
+                "titre": "🔥 Cuisson (25 min)",
+                "description": "Badigeonner de beurre fondu et jaune d'œuf. Enfourner jusqu'à ce que ce soit bien doré.",
+                "temperature": "Four 180°C",
+                "duree": "25 minutes",
+                "astuce": "Surveiller la coloration!"
+            },
+            {
+                "num": 5,
+                "titre": "🍯 Finition au miel (5 min)",
+                "description": "À la sortie du four, arroser généreusement de miel chaud. Décorer d'amandes effilées.",
+                "temperature": "Chaud",
+                "duree": "5 minutes",
+                "astuce": "Le miel doit être chaud pour bien pénétrer!"
+            },
+            {
+                "num": 6,
+                "titre": "🍽️ Service",
+                "description": "Laisser tiédir et couper en parts. Servir avec du thé à la menthe.",
+                "temperature": "Tiède",
+                "duree": "Immédiat",
+                "astuce": "Indispensable aux fêtes marocaines!"
+            }
+        ],
+        "anecdote": "La mhancha (serpent en arabe) est le gâteau des grandes occasions au Maroc: mariages, baptêmes, fêtes religieuses!"
+    },
+    
+    "Soupe à l'Oignon": {
+        "pays": "🇫🇷 France",
+        "categorie": "Soupe",
+        "budget_assiette": 1.50,
+        "duree_min": 50,
+        "difficulte": "Facile",
+        "saison": "Hiver",
+        "ingredients": {
+            "oignon_kg": 0.6,
+            "beurre_kg": 0.05,
+            "farine_kg": 0.03,
+            "vin_rouge_kg": 0.1,
+            "fromage_rape_kg": 0.1,
+            "pain_kg": 0.1
+        },
+        "etapes": [
+            {
+                "num": 1,
+                "titre": "🧅 Caramélisation des oignons (30 min)",
+                "description": "Émincer finement les oignons. Les faire revenir dans le beurre à feu doux jusqu'à ce qu'ils soient bien dorés et caramélisés.",
+                "temperature": "Feu doux",
+                "duree": "30 minutes",
+                "astuce": "Patience! C'est la caramélisation qui fait tout!"
+            },
+            {
+                "num": 2,
+                "titre": "🍷 Déglaçage (5 min)",
+                "description": "Saupoudrer de farine, mélanger. Déglacer au vin blanc ou rouge. Ajouter 1.5L de bouillon de bœuf ou d'eau. Saler, poivrer, thym, laurier.",
+                "temperature": "Feu moyen",
+                "duree": "5 minutes",
+                "astuce": "Bien gratter les sucs de cuisson!"
+            },
+            {
+                "num": 3,
+                "titre": "💧 Cuisson (15 min)",
+                "description": "Laisser mijoter à feu doux pour que les saveurs se développent.",
+                "temperature": "Feu doux",
+                "duree": "15 minutes",
+                "astuce": "Plus ça mijote, meilleur c'est!"
+            },
+            {
+                "num": 4,
+                "titre": "🧀 Gratinage (5 min)",
+                "description": "Verser la soupe dans des bols allant au four. Ajouter des croûtons de pain. Couvrir généreusement de gruyère râpé. Gratiner sous le gril.",
+                "temperature": "Gril du four",
+                "duree": "5 minutes",
+                "astuce": "Le fromage doit être bien doré et filant!"
+            },
+            {
+                "num": 5,
+                "titre": "🍽️ Service",
+                "description": "Servir immédiatement, attention c'est très chaud!",
+                "temperature": "Brûlant",
+                "duree": "Immédiat",
+                "astuce": "La soupe des nuits parisiennes!"
+            }
+        ],
+        "anecdote": "La soupe à l'oignon gratinée était servie aux Halles de Paris aux travailleurs de nuit. Un classique réconfortant!"
+    },
+    
+    "Cornes de Gazelle": {
+        "pays": "🇲🇦 Maroc",
+        "categorie": "Dessert",
+        "budget_assiette": 2.50,
+        "duree_min": 75,
+        "difficulte": "Difficile",
+        "saison": "Toute",
+        "darija": "كعب الغزال - Kaab lghzal, le must!",
+        "ingredients": {
+            "farine_kg": 0.25,
+            "amandes_kg": 0.25,
+            "sucre_kg": 0.15,
+            "beurre_kg": 0.1,
+            "eau_fleur_oranger_kg": 0.03
+        },
+        "etapes": [
+            {
+                "num": 1,
+                "titre": "🥜 Pâte d'amandes (20 min)",
+                "description": "Mixer les amandes mondées avec le sucre glace, l'eau de fleur d'oranger et un peu de beurre fondu jusqu'à obtenir une pâte souple.",
+                "temperature": "Température ambiante",
+                "duree": "20 minutes",
+                "astuce": "La pâte doit être malléable mais pas collante!"
+            },
+            {
+                "num": 2,
+                "titre": "🥟 Pâte extérieure (15 min)",
+                "description": "Mélanger farine, beurre fondu, eau de fleur d'oranger et un peu d'eau. Pétrir jusqu'à obtenir une pâte élastique. Laisser reposer.",
+                "temperature": "Température ambiante",
+                "duree": "15 minutes",
+                "astuce": "Pâte très fine et élastique!"
+            },
+            {
+                "num": 3,
+                "titre": "🌙 Façonnage (25 min)",
+                "description": "Former des petits boudins de pâte d'amandes. Étaler finement la pâte, y déposer les boudins, replier et former des croissants en pinçant les bords.",
+                "temperature": "Température ambiante",
+                "duree": "25 minutes",
+                "astuce": "La forme doit évoquer une corne de gazelle!"
+            },
+            {
+                "num": 4,
+                "titre": "🔥 Cuisson (15 min)",
+                "description": "Disposer sur une plaque beurrée. Piquer avec une aiguille pour éviter qu'ils éclatent. Enfourner jusqu'à légère coloration.",
+                "temperature": "Four 180°C",
+                "duree": "15 minutes",
+                "astuce": "Ils ne doivent PAS dorer, juste cuire!"
+            },
+            {
+                "num": 5,
+                "titre": "✨ Finition",
+                "description": "À la sortie du four, saupoudrer légèrement de sucre glace.",
+                "temperature": "Tiède",
+                "duree": "5 minutes",
+                "astuce": "Délicats et fondants en bouche!"
+            },
+            {
+                "num": 6,
+                "titre": "🍽️ Service",
+                "description": "Servir avec du thé à la menthe. Se conservent plusieurs jours dans une boîte hermétique.",
+                "temperature": "Température ambiante",
+                "duree": "Immédiat",
+                "astuce": "Le roi des gâteaux marocains!"
+            }
+        ],
+        "anecdote": "Les cornes de gazelle (kaab lghzal) sont considérées comme le summum de la pâtisserie marocaine. Leur finesse est un signe de maîtrise!"
     }
 }
 
 # =============================================================================
-# PRIX DES PRODUITS (Prix moyens France 2025)
+# PRIX INGRÉDIENTS (référence)
 # =============================================================================
 
 PRIX_INGREDIENTS = {
-    # Viandes
-    "viande_mouton_kg": 12.50,
-    "viande_hachee_kg": 8.90,
-    "poulet_kg": 6.50,
-    "merguez_kg": 9.50,
-    "dinde_kg": 7.80,
-    "veau_kg": 18.00,
-    "boeuf_kg": 15.00,
-    "lardons_kg": 10.00,
-    "jambon_kg": 12.00,
-    "chair_saucisse_kg": 8.50,
-    "pigeon_ou_poulet_kg": 8.00,
-    
-    # Poissons
-    "thon_kg": 20.00,
-    "anchois_kg": 35.00,
-    "poisson_blanc_kg": 16.00,
-    
-    # Légumes
-    "tomates_kg": 2.80,
-    "oignon_kg": 1.50,
-    "carotte_kg": 1.20,
-    "courgette_kg": 2.50,
-    "aubergine_kg": 3.00,
-    "poivron_kg": 4.00,
-    "pomme_terre_kg": 1.30,
-    "legumes_kg": 2.50,
-    "navet_kg": 1.80,
-    "poireau_kg": 2.20,
-    "celeri_kg": 2.00,
-    "champignon_kg": 7.00,
-    "oignon_grelot_kg": 3.50,
-    
-    # Légumineuses
-    "lentilles_kg": 3.50,
-    "pois_chiches_kg": 3.20,
-    "feves_seches_kg": 4.00,
-    
-    # Céréales
-    "farine_kg": 1.20,
-    "semoule_couscous_kg": 2.00,
-    "semoule_fine_kg": 1.80,
-    "vermicelles_kg": 2.50,
-    "pain_mie_kg": 2.50,
-    "pate_brisee_kg": 3.50,
-    "feuilles_brick_kg": 8.00,
-    "msemmen_ou_crepes_kg": 5.00,
-    
-    # Herbes et aromates
-    "coriandre_kg": 8.00,
-    "persil_kg": 8.00,
-    "ail_kg": 6.00,
-    "thym_kg": 20.00,
-    "herbes_kg": 15.00,
-    "fines_herbes_kg": 20.00,
-    
-    # Produits laitiers
-    "creme_kg": 5.00,
-    "lait_kg": 1.10,
-    "beurre_kg": 10.00,
-    "smen_beurre_kg": 15.00,
-    "fromage_rape_kg": 12.00,
-    "gruyere_kg": 14.00,
-    "jaune_oeuf_kg": 8.00,
-    "oeuf_kg": 3.50,
-    "oeuf_dur_kg": 3.50,
-    
-    # Fruits
-    "citron_kg": 3.50,
-    "citron_confit_kg": 12.00,
-    "citron_frais_kg": 3.50,
-    "marron_kg": 18.00,
-    
-    # Autres
-    "olives_kg": 8.00,
-    "olive_kg": 8.00,
-    "huile_olive_kg": 8.00,
-    "huile_kg": 5.00,
-    "huile_friture_kg": 4.00,
-    "sucre_kg": 1.50,
-    "miel_kg": 15.00,
-    "chocolat_kg": 12.00,
-    "cacao_kg": 8.00,
-    "amandes_kg": 18.00,
-    "sesame_kg": 10.00,
-    "raisins_secs_kg": 8.00,
-    "cannelle_kg": 25.00,
-    "muscade_kg": 30.00,
-    "cumin_kg": 15.00,
-    "paprika_kg": 12.00,
-    "fenugrec_kg": 10.00,
-    "levure_kg": 8.00,
-    "sel_kg": 1.00,
-    "vin_rouge_kg": 8.00,
-    "eau_fleur_oranger_kg": 12.00,
-    "os_moelle_kg": 5.00
+    "viande_mouton_kg": 12.50, "viande_hachee_kg": 8.90, "poulet_kg": 6.50,
+    "merguez_kg": 9.50, "dinde_kg": 7.80, "veau_kg": 18.00, "boeuf_kg": 15.00,
+    "lardons_kg": 10.00, "jambon_kg": 12.00, "chair_saucisse_kg": 8.50,
+    "pigeon_ou_poulet_kg": 8.00, "thon_kg": 20.00, "anchois_kg": 35.00,
+    "poisson_blanc_kg": 16.00, "tomates_kg": 2.80, "oignon_kg": 1.50,
+    "carotte_kg": 1.20, "courgette_kg": 2.50, "aubergine_kg": 3.00,
+    "poivron_kg": 4.00, "pomme_terre_kg": 1.30, "legumes_kg": 2.50,
+    "navet_kg": 1.80, "poireau_kg": 2.20, "celeri_kg": 2.00,
+    "champignon_kg": 7.00, "oignon_grelot_kg": 3.50, "lentilles_kg": 3.50,
+    "pois_chiches_kg": 3.20, "feves_seches_kg": 4.00, "farine_kg": 1.20,
+    "semoule_couscous_kg": 2.00, "semoule_fine_kg": 1.80, "vermicelles_kg": 2.50,
+    "pain_mie_kg": 2.50, "pate_brisee_kg": 3.50, "feuilles_brick_kg": 8.00,
+    "msemmen_ou_crepes_kg": 5.00, "coriandre_kg": 8.00, "persil_kg": 8.00,
+    "ail_kg": 6.00, "thym_kg": 20.00, "herbes_kg": 15.00, "fines_herbes_kg": 20.00,
+    "creme_kg": 5.00, "lait_kg": 1.10, "beurre_kg": 10.00, "smen_beurre_kg": 15.00,
+    "fromage_rape_kg": 12.00, "gruyere_kg": 14.00, "jaune_oeuf_kg": 8.00,
+    "oeuf_kg": 3.50, "oeuf_dur_kg": 3.50, "citron_kg": 3.50,
+    "citron_confit_kg": 12.00, "citron_frais_kg": 3.50, "marron_kg": 18.00,
+    "olives_kg": 8.00, "olive_kg": 8.00, "huile_olive_kg": 8.00, "huile_kg": 5.00,
+    "huile_friture_kg": 4.00, "sucre_kg": 1.50, "miel_kg": 15.00,
+    "chocolat_kg": 12.00, "cacao_kg": 8.00, "amandes_kg": 18.00,
+    "sesame_kg": 10.00, "raisins_secs_kg": 8.00, "cannelle_kg": 25.00,
+    "muscade_kg": 30.00, "cumin_kg": 15.00, "paprika_kg": 12.00,
+    "fenugrec_kg": 10.00, "levure_kg": 8.00, "sel_kg": 1.00,
+    "vin_rouge_kg": 8.00, "eau_fleur_oranger_kg": 12.00, "os_moelle_kg": 5.00,
+    "orange_kg": 2.50, "pain_kg": 2.00
 }
 
 # =============================================================================
-# FONCTIONS AUDIO, MÉTÉO, COMPARATEUR, MODE CUISINE
+# INITIALISATION SESSION STATE
+# =============================================================================
+
+def init_session_state():
+    """Initialise toutes les variables de session"""
+    defaults = {
+        'profil': {
+            'nom': '',
+            'ville': '',
+            'allergies': [],
+            'preferences': [],
+            'niveau': 'debutant'
+        },
+        'historique': [],
+        'recette_en_cours': None,
+        'mode_cuisine': False,
+        'etape_cuisine': 0,
+        'last_audio_hash': None,
+        'ville_utilisateur': '',
+        'bienvenue_jouee': False,
+        'nb_personnes': 4,
+        'ingredients_disponibles': [],
+        'timers': [],
+        'meteo_cache': None
+    }
+    
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+init_session_state()
+
+# =============================================================================
+# FONCTIONS GÉOLOCALISATION (CORRIGÉES)
+# =============================================================================
+
+def obtenir_ville_via_ip():
+    """Géolocalisation via IP - Plusieurs APIs en fallback"""
+    apis = [
+        ('https://ipapi.co/json/', lambda d: d.get('city', '')),
+        ('https://ip-api.com/json/', lambda d: d.get('city', '')),
+        ('https://ipinfo.io/json', lambda d: d.get('city', ''))
+    ]
+    
+    for url, extractor in apis:
+        try:
+            response = requests.get(url, timeout=3)
+            if response.status_code == 200:
+                data = response.json()
+                ville = extractor(data)
+                if ville and ville != 'undefined':
+                    return ville
+        except:
+            continue
+    
+    return ""
+
+def obtenir_geolocalisation_html5():
+    """Géolocalisation HTML5 pour navigateur - CORRIGÉE"""
+    return """
+    <script>
+    (function() {
+        // Éviter les exécutions multiples
+        if (window.geoRequested) return;
+        window.geoRequested = true;
+        
+        // Vérifier si déjà une ville dans l'URL
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('ville_gps') && urlParams.get('ville_gps') !== '') {
+            return;
+        }
+        
+        // Demander géolocalisation
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    
+                    // Reverse geocoding avec Nominatim
+                    fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=fr`, {
+                        headers: {'User-Agent': 'SarahMiam/3.0'}
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        const addr = data.address || {};
+                        const ville = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
+                        if (ville && ville.length > 0) {
+                            const params = new URLSearchParams(window.location.search);
+                            params.set('ville_gps', ville);
+                            window.location.search = params.toString();
+                        }
+                    })
+                    .catch(err => console.log('Geocoding error:', err));
+                },
+                function(error) {
+                    console.log('Géolocalisation refusée ou indisponible:', error.message);
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 300000
+                }
+            );
+        }
+    })();
+    </script>
+    """
+
+# =============================================================================
+# FONCTION MÉTÉO (CORRIGÉE)
 # =============================================================================
 
 def obtenir_meteo():
-    """Récupère météo OpenWeather pour la ville de l'utilisateur"""
+    """Récupère météo OpenWeather - avec cache"""
     if not OPENWEATHER_API_KEY:
         return None
     
     ville = st.session_state.ville_utilisateur
-    if not ville:
+    if not ville or ville == "France":
         return None
     
+    # Cache de 10 minutes
+    if st.session_state.meteo_cache:
+        cache = st.session_state.meteo_cache
+        if cache.get('ville') == ville:
+            age = (datetime.now() - cache.get('timestamp', datetime.min)).seconds
+            if age < 600:
+                return cache.get('data')
+    
     try:
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={ville}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={ville},FR&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            return {
+            meteo = {
                 'temp': round(data['main']['temp'], 1),
                 'description': data['weather'][0]['description'],
+                'icon': data['weather'][0]['icon'],
                 'ville': ville
             }
-        else:
-            return None
+            # Mettre en cache
+            st.session_state.meteo_cache = {
+                'ville': ville,
+                'data': meteo,
+                'timestamp': datetime.now()
+            }
+            return meteo
     except Exception as e:
+        pass
+    
+    return None
+
+def suggestion_meteo(meteo):
+    """Suggère des recettes selon la météo"""
+    if not meteo:
+        return []
+    
+    temp = meteo['temp']
+    desc = meteo['description'].lower()
+    suggestions = []
+    
+    # Selon température
+    if temp < 10:
+        suggestions = ["Harira", "Pot-au-Feu", "Soupe à l'Oignon", "Couscous Royal", "Blanquette de Veau"]
+    elif temp < 18:
+        suggestions = ["Tajine Poulet Citron", "Bœuf Bourguignon", "Rfissa", "Gratin Dauphinois"]
+    else:
+        suggestions = ["Salade Niçoise", "Ratatouille", "Zaalouk", "Poisson Vapeur"]
+    
+    # Selon description
+    if 'pluie' in desc or 'nuage' in desc:
+        suggestions = ["Harira", "Bissara", "Soupe à l'Oignon", "Blanquette de Veau"]
+    
+    return suggestions[:3]
+
+# =============================================================================
+# FONCTIONS ALLERGIES (NOUVELLE)
+# =============================================================================
+
+def verifier_allergenes(recette_nom, allergies_utilisateur):
+    """Vérifie si une recette contient des allergènes de l'utilisateur"""
+    if not allergies_utilisateur:
+        return True, []
+    
+    recette = RECETTES_DETAILLEES.get(recette_nom)
+    if not recette:
+        return True, []
+    
+    allergenes_trouves = []
+    ingredients = list(recette.get('ingredients', {}).keys())
+    
+    for allergie in allergies_utilisateur:
+        if allergie.lower() in ALLERGENES:
+            for ingredient_allergie in ALLERGENES[allergie.lower()]:
+                for ing in ingredients:
+                    if ingredient_allergie in ing.lower():
+                        allergenes_trouves.append(f"{allergie}: {ing}")
+    
+    return len(allergenes_trouves) == 0, allergenes_trouves
+
+def filtrer_recettes_allergies(allergies):
+    """Retourne les recettes sans les allergènes spécifiés"""
+    recettes_ok = []
+    for nom in RECETTES_DETAILLEES.keys():
+        ok, _ = verifier_allergenes(nom, allergies)
+        if ok:
+            recettes_ok.append(nom)
+    return recettes_ok
+
+def detecter_allergies(texte):
+    """Détecte les allergies mentionnées dans un texte"""
+    texte_lower = texte.lower()
+    allergies_detectees = []
+    
+    mots_cles = {
+        "gluten": ["gluten", "blé", "céréales"],
+        "lactose": ["lactose", "lait", "produits laitiers"],
+        "arachides": ["arachide", "cacahuète"],
+        "fruits_a_coque": ["noix", "amande", "noisette", "fruits à coque"],
+        "oeufs": ["oeuf", "œuf"],
+        "poisson": ["poisson"],
+        "crustaces": ["crustacé", "crevette", "crabe"],
+        "soja": ["soja"],
+        "celeri": ["céleri"],
+        "sesame": ["sésame"]
+    }
+    
+    for allergie, mots in mots_cles.items():
+        for mot in mots:
+            if mot in texte_lower:
+                if allergie not in allergies_detectees:
+                    allergies_detectees.append(allergie)
+    
+    return allergies_detectees
+
+# =============================================================================
+# FONCTIONS INGRÉDIENTS (NOUVELLE)
+# =============================================================================
+
+def verifier_ingredients(recette_nom, ingredients_disponibles):
+    """Vérifie quels ingrédients manquent pour une recette"""
+    recette = RECETTES_DETAILLEES.get(recette_nom)
+    if not recette:
+        return [], []
+    
+    ingredients_recette = list(recette.get('ingredients', {}).keys())
+    disponibles = [i.lower().replace(' ', '_') for i in ingredients_disponibles]
+    
+    manquants = []
+    presents = []
+    
+    for ing in ingredients_recette:
+        ing_clean = ing.lower().replace('_kg', '').replace('_litre', '').replace('_unite', '')
+        trouve = False
+        for dispo in disponibles:
+            if ing_clean in dispo or dispo in ing_clean:
+                trouve = True
+                break
+        
+        if trouve:
+            presents.append(ing)
+        else:
+            manquants.append(ing)
+    
+    return presents, manquants
+
+def generer_liste_courses(recette_nom, nb_personnes=4):
+    """Génère une liste de courses pour une recette"""
+    recette = RECETTES_DETAILLEES.get(recette_nom)
+    if not recette:
+        return []
+    
+    multiplicateur = nb_personnes / 4  # Recettes de base pour 4
+    liste = []
+    
+    for ing, quantite in recette.get('ingredients', {}).items():
+        ing_clean = ing.replace('_kg', '').replace('_litre', '').replace('_unite', '').replace('_', ' ')
+        qte_ajustee = round(quantite * multiplicateur, 2)
+        
+        if '_kg' in ing:
+            unite = 'kg'
+        elif '_litre' in ing:
+            unite = 'L'
+        else:
+            unite = 'unité(s)'
+        
+        liste.append({
+            'ingredient': ing_clean.capitalize(),
+            'quantite': qte_ajustee,
+            'unite': unite
+        })
+    
+    return liste
+
+# =============================================================================
+# FONCTIONS MODE GROUPE (NOUVELLE)
+# =============================================================================
+
+def multiplier_recette(recette_nom, nb_personnes):
+    """Multiplie les quantités d'une recette selon le nombre de personnes"""
+    recette = RECETTES_DETAILLEES.get(recette_nom)
+    if not recette:
         return None
+    
+    multiplicateur = nb_personnes / 4
+    
+    ingredients_ajustes = {}
+    for ing, qte in recette.get('ingredients', {}).items():
+        ingredients_ajustes[ing] = round(qte * multiplicateur, 2)
+    
+    budget_ajuste = round(recette.get('budget_assiette', 0) * nb_personnes, 2)
+    
+    return {
+        'ingredients': ingredients_ajustes,
+        'budget_total': budget_ajuste,
+        'nb_personnes': nb_personnes
+    }
+
+# =============================================================================
+# FONCTIONS SUGGESTIONS INTELLIGENTES (NOUVELLE)
+# =============================================================================
+
+def suggerer_recettes(budget_max=None, temps_max=None, difficulte=None, saison=None):
+    """Suggère des recettes selon les critères"""
+    suggestions = []
+    
+    for nom, recette in RECETTES_DETAILLEES.items():
+        score = 0
+        
+        # Filtre budget
+        if budget_max and recette.get('budget_assiette', 0) <= budget_max:
+            score += 1
+        elif budget_max:
+            continue
+        
+        # Filtre temps
+        if temps_max and recette.get('duree_min', 0) <= temps_max:
+            score += 1
+        elif temps_max:
+            continue
+        
+        # Filtre difficulté
+        if difficulte:
+            diff_recette = recette.get('difficulte', '').lower()
+            if difficulte.lower() == diff_recette:
+                score += 1
+            elif difficulte.lower() == 'facile' and diff_recette != 'facile':
+                continue
+        
+        # Filtre saison
+        if saison:
+            saison_recette = recette.get('saison', 'Toute').lower()
+            if saison.lower() in saison_recette or saison_recette == 'toute':
+                score += 1
+        
+        suggestions.append((nom, score, recette))
+    
+    # Trier par score décroissant
+    suggestions.sort(key=lambda x: x[1], reverse=True)
+    
+    return [(s[0], s[2]) for s in suggestions[:6]]
+
+# =============================================================================
+# FONCTION DÉTECTION STRESS (NOUVELLE)
+# =============================================================================
+
+def detecter_stress(texte):
+    """Détecte le stress dans le message de l'utilisateur"""
+    texte_lower = texte.lower()
+    
+    mots_stress = [
+        "pressé", "vite", "rapide", "urgent", "pas le temps",
+        "fatigué", "épuisé", "crevé", "stressé", "stress",
+        "simple", "facile", "compliqué", "dur", "difficile",
+        "aide", "help", "sos", "panique"
+    ]
+    
+    score_stress = 0
+    for mot in mots_stress:
+        if mot in texte_lower:
+            score_stress += 1
+    
+    return score_stress >= 2
+
+def recettes_anti_stress():
+    """Retourne des recettes simples et rapides pour les moments de stress"""
+    recettes = []
+    for nom, recette in RECETTES_DETAILLEES.items():
+        if recette.get('difficulte') == 'Facile' and recette.get('duree_min', 999) <= 30:
+            recettes.append(nom)
+    return recettes[:5]
+
+# =============================================================================
+# FONCTIONS AUDIO
+# =============================================================================
 
 def transcribe_audio_whisper(audio_bytes):
-    """Transcription Whisper Groq"""
+    """Transcription Whisper via Groq"""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
             tmp_file.write(audio_bytes)
@@ -2630,43 +3279,32 @@ def transcribe_audio_whisper(audio_bytes):
         return None
 
 def lire_texte_vocal(texte):
-    """Synthèse vocale - VERSION MOBILE OPTIMISÉE"""
+    """Synthèse vocale via JavaScript"""
     if not texte or len(texte) < 3:
         return
     
-    # Nettoyer le texte - ENLEVER TOUS LES EMOJIS
-    import re
-    
-    # Pattern ultra-complet pour TOUS les emojis
+    # Nettoyer le texte - supprimer emojis
     emoji_pattern = re.compile(
         "["
-        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
-        "\U0001F300-\U0001F5FF"  # symbols & pictographs
-        "\U0001F600-\U0001F64F"  # emoticons
-        "\U0001F680-\U0001F6FF"  # transport & map symbols
-        "\U0001F700-\U0001F77F"  # alchemical symbols
-        "\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
-        "\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
-        "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
-        "\U0001FA00-\U0001FA6F"  # Chess Symbols
-        "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
-        "\U00002702-\U000027B0"  # Dingbats
-        "\U000024C2-\U0001F251" 
+        "\U0001F1E0-\U0001F1FF"
+        "\U0001F300-\U0001F5FF"
+        "\U0001F600-\U0001F64F"
+        "\U0001F680-\U0001F6FF"
+        "\U0001F700-\U0001F77F"
+        "\U0001F780-\U0001F7FF"
+        "\U0001F800-\U0001F8FF"
+        "\U0001F900-\U0001F9FF"
+        "\U0001FA00-\U0001FA6F"
+        "\U0001FA70-\U0001FAFF"
+        "\U00002702-\U000027B0"
+        "\U000024C2-\U0001F251"
         "]+",
         flags=re.UNICODE
     )
-    texte_clean = emoji_pattern.sub(' ', texte)  # Remplacer par espace
-    
-    # Nettoyer caractères spéciaux
+    texte_clean = emoji_pattern.sub(' ', texte)
     texte_clean = texte_clean.replace("'", "'").replace('"', ' ').replace('\n', ' ').replace('`', ' ')
+    texte_clean = re.sub(r'\s+', ' ', texte_clean).strip()[:300]
     
-    # Supprimer espaces multiples
-    texte_clean = re.sub(r'\s+', ' ', texte_clean).strip()
-    
-    # Max 300 caractères
-    texte_clean = texte_clean[:300]
-    
-    # ID unique
     unique_id = abs(hash(texte_clean + str(datetime.now().timestamp()))) % 100000
     
     html = f"""
@@ -2674,12 +3312,10 @@ def lire_texte_vocal(texte):
     <script>
     (function() {{
         try {{
-            // RESET COMPLET
             if (window.speechSynthesis) {{
                 window.speechSynthesis.cancel();
             }}
             
-            // Fonction pour lire
             function speak() {{
                 try {{
                     const text = `{texte_clean}`;
@@ -2689,357 +3325,201 @@ def lire_texte_vocal(texte):
                     utterance.pitch = 1.0;
                     utterance.volume = 1.0;
                     
-                    // Attendre les voix
                     const voices = window.speechSynthesis.getVoices();
                     const frVoice = voices.find(v => v.lang.startsWith('fr'));
-                    if (frVoice) {{
-                        utterance.voice = frVoice;
-                    }}
+                    if (frVoice) utterance.voice = frVoice;
                     
-                    // Parler
                     window.speechSynthesis.speak(utterance);
-                }} catch(e) {{
-                    console.log('Audio error:', e);
-                }}
+                }} catch(e) {{}}
             }}
             
-            // Sur mobile, les voix se chargent après
             if (window.speechSynthesis.getVoices().length === 0) {{
                 window.speechSynthesis.onvoiceschanged = function() {{
                     speak();
                     window.speechSynthesis.onvoiceschanged = null;
                 }};
             }} else {{
-                setTimeout(speak, 500);
+                setTimeout(speak, 300);
             }}
-            
-        }} catch(error) {{
-            console.log('Speech init error:', error);
-        }}
+        }} catch(error) {{}}
     }})();
     </script>
     """
     st.components.v1.html(html, height=0)
 
-def detecter_ville(user_input):
-    """Détecte si l'utilisateur mentionne sa ville"""
-    villes_france = ["Paris", "Lyon", "Marseille", "Toulouse", "Nice", "Nantes", "Strasbourg",
-                     "Montpellier", "Bordeaux", "Lille", "Rennes", "Reims", "Le Havre",
-                     "Clermont-Ferrand", "Gerzat", "Aubière", "Beaumont", "Cournon"]
-    
-    user_lower = user_input.lower()
-    
-    if "j'habite" in user_lower or "je vis" in user_lower or "je suis de" in user_lower or "je suis à" in user_lower:
-        for ville in villes_france:
-            if ville.lower() in user_lower:
-                st.session_state.ville_utilisateur = ville
-                return ville
-    
-    return None
+# =============================================================================
+# FONCTIONS COMPARATEUR ET GPS
+# =============================================================================
 
 def comparer_prix(ingredients):
-    """Compare prix entre enseignes"""
+    """Compare les prix entre enseignes"""
     comparaison = {}
     details = {}
-    for enseigne, prix in PRIX_ENSEIGNES.items():
-        total = sum(prix.get(i, 0) * q for i, q in ingredients.items())
-        comparaison[enseigne] = round(total, 2)
-        details[enseigne] = {ing: round(prix.get(ing, 0) * q, 2) for ing, q in ingredients.items()}
-    return dict(sorted(comparaison.items(), key=lambda x: x[1])), details
-
-def obtenir_ville_via_ip():
-    """Géolocalisation automatique via IP - API gratuite ipapi.co"""
-    try:
-        response = requests.get('https://ipapi.co/json/', timeout=3)
-        if response.status_code == 200:
-            data = response.json()
-            ville = data.get('city', '')
-            pays = data.get('country_name', '')
-            
-            if ville:
-                return ville
-    except:
-        pass
     
-    return "France"
-
-def obtenir_geolocalisation_html5():
-    """Géolocalisation HTML5 native - Marche sur mobile!"""
-    html_geo = """
-    <script>
-    (function() {
-        // Vérifier si déjà une ville dans l'URL
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has('ville_gps')) {
-            return; // Déjà fait
-        }
+    for enseigne, prix in PRIX_ENSEIGNES.items():
+        total = 0
+        detail_enseigne = {}
+        for ing, qte in ingredients.items():
+            prix_ing = prix.get(ing, PRIX_INGREDIENTS.get(ing, 0))
+            cout = prix_ing * qte
+            total += cout
+            detail_enseigne[ing] = round(cout, 2)
         
-        // Demander géolocalisation
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                function(position) {
-                    const lat = position.coords.latitude;
-                    const lon = position.coords.longitude;
-                    
-                    // Reverse geocoding avec Nominatim
-                    fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, {
-                        headers: {'User-Agent': 'SarahMiam/1.0'}
-                    })
-                    .then(r => r.json())
-                    .then(data => {
-                        const ville = data.address.city || data.address.town || data.address.village || '';
-                        if (ville) {
-                            // Recharger avec ville
-                            const params = new URLSearchParams(window.location.search);
-                            params.set('ville_gps', ville);
-                            window.location.search = params.toString();
-                        }
-                    })
-                    .catch(err => console.log('Geocoding:', err));
-                },
-                function(error) {
-                    console.log('Géoloc refusée');
-                }
-            );
-        }
-    })();
-    </script>
-    """
-    return html_geo
+        comparaison[enseigne] = round(total, 2)
+        details[enseigne] = detail_enseigne
+    
+    # Trier par prix croissant
+    comparaison = dict(sorted(comparaison.items(), key=lambda x: x[1]))
+    
+    return comparaison, details
 
-def reverse_geocoding(lat, lon):
-    """Convertir lat/lon en ville avec Nominatim (gratuit)"""
-    try:
-        url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
-        headers = {'User-Agent': 'SarahMiam/1.0'}
-        response = requests.get(url, headers=headers, timeout=5)
-        
-        if response.status_code == 200:
-            data = response.json()
-            address = data.get('address', {})
-            
-            # Essayer différents niveaux
-            ville = (address.get('city') or 
-                    address.get('town') or 
-                    address.get('village') or 
-                    address.get('municipality') or
-                    address.get('county') or
-                    'France')
-            
-            return ville
-    except Exception as e:
-        return None
+# =============================================================================
+# FONCTIONS CONVERSION
+# =============================================================================
+
+def convertir_mesure(valeur, de_unite, vers_unite):
+    """Convertit les mesures culinaires"""
+    conversions = {
+        ('g', 'tasse_farine'): lambda v: v / 125,
+        ('tasse_farine', 'g'): lambda v: v * 125,
+        ('g', 'tasse_sucre'): lambda v: v / 200,
+        ('tasse_sucre', 'g'): lambda v: v * 200,
+        ('ml', 'tasse'): lambda v: v / 250,
+        ('tasse', 'ml'): lambda v: v * 250,
+        ('ml', 'cuillere_soupe'): lambda v: v / 15,
+        ('cuillere_soupe', 'ml'): lambda v: v * 15,
+        ('celsius', 'fahrenheit'): lambda v: (v * 9/5) + 32,
+        ('fahrenheit', 'celsius'): lambda v: (v - 32) * 5/9,
+        ('g', 'oz'): lambda v: v / 28.35,
+        ('oz', 'g'): lambda v: v * 28.35,
+        ('kg', 'lb'): lambda v: v * 2.205,
+        ('lb', 'kg'): lambda v: v / 2.205
+    }
+    
+    key = (de_unite.lower(), vers_unite.lower())
+    if key in conversions:
+        return round(conversions[key](valeur), 2)
     
     return None
 
-def afficher_etape_cuisine():
-    """Affiche mode cuisine vocal avec étapes détaillées"""
-    if st.session_state.recette_en_cours and st.session_state.mode_cuisine:
-        recette = RECETTES_DETAILLEES.get(st.session_state.recette_en_cours)
-        if not recette:
-            return
-            
-        etapes = recette['etapes']
-        etape_actuelle = st.session_state.etape_cuisine
-        
-        if etape_actuelle < len(etapes):
-            etape = etapes[etape_actuelle]
-            st.markdown(f"""
-            <div class="etape-box">
-                <h2>🍳 ÉTAPE {etape_actuelle + 1} / {len(etapes)}</h2>
-                <h3>{etape['titre']}</h3>
-                <p style="font-size: 22px; margin-top: 20px;">{etape['description']}</p>
-                <p style="font-size: 18px; margin-top: 15px;">🌡️ {etape['temperature']} - ⏱️ {etape['duree']}</p>
-                <p style="font-size: 16px; font-style: italic; margin-top: 10px;">💡 {etape['astuce']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if etape_actuelle == 0:
-                lire_texte_vocal(f"Étape {etape_actuelle + 1}: {etape['description']}")
-        else:
-            msg_fin = "Bsaha ! Ton plat est prêt ! Bon appétit ! 🎉"
-            if "darija" in recette and recette['darija']:
-                msg_fin = "Bsaha ! " + recette['darija']
-            st.success(msg_fin)
-            lire_texte_vocal(msg_fin)
-            st.session_state.mode_cuisine = False
-
-
 # =============================================================================
-# CSS PERSONNALISÉ
+# FONCTION TIMER
 # =============================================================================
 
-st.markdown("""
-<style>
-    /* Fond général */
-    .main {
-        background: linear-gradient(135deg, #FFF8E7 0%, #FFE4B5 100%);
-    }
+def creer_timer_html(duree_minutes, nom_timer):
+    """Crée un timer JavaScript"""
+    duree_secondes = duree_minutes * 60
     
-    /* Titre principal */
-    h1 {
-        color: #FF6B35;
-        text-align: center;
-        font-size: 3.5em !important;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-        margin-bottom: 30px;
-        font-family: 'Arial Black', sans-serif;
-    }
-    
-    /* Boutons */
-    .stButton>button {
-        background: linear-gradient(135deg, #FF6B35 0%, #FF8C42 100%);
-        color: white;
-        font-size: 22px;
-        padding: 18px 35px;
-        border-radius: 15px;
-        border: none;
-        width: 100%;
-        font-weight: bold;
-        box-shadow: 0 4px 15px rgba(255,107,53,0.3);
-        transition: all 0.3s ease;
-    }
-    
-    .stButton>button:hover {
-        background: linear-gradient(135deg, #FF8C42 0%, #FFA366 100%);
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(255,107,53,0.4);
-    }
-    
-    /* Cartes de recettes */
-    .recette-card {
-        background: white;
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        margin: 15px 0;
-        border-left: 5px solid #FF6B35;
-    }
-    
-    /* Messages */
-    .stChatMessage {
-        border-radius: 15px;
-        margin: 10px 0;
-    }
-    
-    /* Boîte étapes cuisine */
-    .etape-box {
+    html = f"""
+    <div id="timer-{nom_timer}" style="
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        padding: 30px;
+        padding: 20px;
         border-radius: 15px;
-        font-size: 24px;
         text-align: center;
-        margin: 20px 0;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-    }
-</style>
-""", unsafe_allow_html=True)
+        margin: 10px 0;
+    ">
+        <div style="font-size: 16px; margin-bottom: 10px;">⏱️ {nom_timer}</div>
+        <div id="display-{nom_timer}" style="font-size: 36px; font-weight: bold;">
+            {duree_minutes:02d}:00
+        </div>
+    </div>
+    
+    <script>
+    (function() {{
+        let seconds = {duree_secondes};
+        const display = document.getElementById('display-{nom_timer}');
+        
+        const timer = setInterval(function() {{
+            seconds--;
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            display.textContent = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+            
+            if (seconds <= 0) {{
+                clearInterval(timer);
+                display.textContent = "TERMINÉ!";
+                display.parentElement.style.background = 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';
+                
+                // Alerte vocale
+                if (window.speechSynthesis) {{
+                    const msg = new SpeechSynthesisUtterance("C'est prêt pour {nom_timer}!");
+                    msg.lang = 'fr-FR';
+                    window.speechSynthesis.speak(msg);
+                }}
+                
+                // Son d'alerte
+                try {{
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = ctx.createOscillator();
+                    osc.connect(ctx.destination);
+                    osc.frequency.value = 800;
+                    osc.start();
+                    setTimeout(() => osc.stop(), 500);
+                }} catch(e) {{}}
+            }}
+        }}, 1000);
+    }})();
+    </script>
+    """
+    return html
 
 # =============================================================================
-# INITIALISATION SESSION STATE
-# =============================================================================
-
-if 'profil' not in st.session_state:
-    st.session_state.profil = {
-        'nom': 'Utilisateur',  # Nom par défaut
-        'situation': '',
-        'ville': '',
-        'preferences': []
-    }
-
-if 'historique' not in st.session_state:
-    st.session_state.historique = []
-
-if 'recette_en_cours' not in st.session_state:
-    st.session_state.recette_en_cours = None
-
-if 'mode_cuisine' not in st.session_state:
-    st.session_state.mode_cuisine = False
-
-if 'etape_cuisine' not in st.session_state:
-    st.session_state.etape_cuisine = 0
-
-if 'last_audio_hash' not in st.session_state:
-    st.session_state.last_audio_hash = None
-
-if 'ville_utilisateur' not in st.session_state:
-    # Géolocalisation IP automatique au premier lancement
-    ville_auto = obtenir_ville_via_ip()
-    st.session_state.ville_utilisateur = ville_auto
-    st.session_state.profil['ville'] = ville_auto
-
-if 'bienvenue_jouee' not in st.session_state:
-    st.session_state.bienvenue_jouee = False
-
-if 'app_initialisee' not in st.session_state:
-    st.session_state.app_initialisee = True
-
-# =============================================================================
-# FONCTIONS GROQ
+# FONCTION IA - SARAH
 # =============================================================================
 
 def demander_sarah(user_input, contexte="conversation"):
-    """Appelle Groq - TON ULTRA-PROFESSIONNEL STRICT"""
+    """Appelle Groq pour obtenir une réponse de Sarah"""
     
+    # Récupérer infos contextuelles
     meteo = obtenir_meteo()
+    profil = st.session_state.profil
     
-    profil_text = ""
-    if st.session_state.profil['nom']:
-        profil_text = f"""
-PROFIL:
-- Prénom: {st.session_state.profil['nom']}
-- Situation: {st.session_state.profil.get('situation', '')}
-- Ville: {st.session_state.ville_utilisateur}
+    # Construire le contexte
+    contexte_info = f"""
+PROFIL UTILISATEUR:
+- Prénom: {profil.get('nom', 'Ami')}
+- Ville: {st.session_state.ville_utilisateur or 'Non renseignée'}
+- Allergies: {', '.join(profil.get('allergies', [])) or 'Aucune'}
+- Nombre de personnes: {st.session_state.nb_personnes}
 """
     
-    if contexte == "profil":
-        system_prompt = f"""Tu es Sarah, assistante culinaire PROFESSIONNELLE.
+    if meteo:
+        contexte_info += f"""
+MÉTÉO ACTUELLE:
+- Température: {meteo['temp']}°C
+- Conditions: {meteo['description']}
+- Suggestions météo: {', '.join(suggestion_meteo(meteo))}
+"""
 
-TON STRICTEMENT PROFESSIONNEL:
-- Utilise UNIQUEMENT le prénom donné
-- JAMAIS de surnom (INTERDIT: "chéri", "BOBO", "ma belle", "mon cœur")
-- Tutoiement simple et direct
-- Réponses COURTES (2-3 phrases MAX)
+    # Liste des recettes disponibles
+    recettes_ma = [n for n, r in RECETTES_DETAILLEES.items() if '🇲🇦' in r['pays']]
+    recettes_fr = [n for n, r in RECETTES_DETAILLEES.items() if '🇫🇷' in r['pays']]
+    
+    system_prompt = f"""Tu es Sarah, assistante culinaire PROFESSIONNELLE bi-culturelle France-Maroc.
 
-{profil_text}
+{contexte_info}
 
-RÈGLE ABSOLUE: Réponds de manière professionnelle et concise."""
+RECETTES DISPONIBLES (40 au total):
+🇲🇦 Marocaines: {', '.join(recettes_ma)}
+🇫🇷 Françaises: {', '.join(recettes_fr)}
 
-    else:
-        system_prompt = f"""Tu es Sarah, assistante culinaire PROFESSIONNELLE bi-culturelle France-Maroc.
+RÈGLES ABSOLUES:
+1. Utilise UNIQUEMENT le prénom de l'utilisateur (jamais "chéri", "BOBO", "ma belle")
+2. Tutoiement simple et professionnel
+3. Réponses COURTES (2-3 phrases MAX)
+4. Si recette demandée pas dans ta liste → propose des alternatives
+5. Si utilisateur stressé/pressé → suggère recettes rapides et faciles
 
-TON ULTRA-PROFESSIONNEL ET STRICT:
-1. Utilise UNIQUEMENT le prénom de l'utilisateur
-2. INTERDICTIONS ABSOLUES:
-   - Surnoms affectifs ("chéri", "mon cœur", "BOBO", "ma belle")
-   - Expressions bizarres ("fourchettes et couteaux", "étincelle")  
-   - Familiarité excessive
-3. Tutoiement professionnel simple
-4. Réponses CONCISES (3-4 phrases MAX)
-5. Emoji OK mais avec modération: 🍽️ 🥘 💚
-
-DARIJA:
-- Pour recettes marocaines uniquement
-- Expressions simples et naturelles
-- Pas de traduction systématique
-
-{profil_text}
+DARIJA (pour recettes marocaines uniquement):
+- Utilise des expressions naturelles: Bsaha, Yallah, Mezyan, Sahel
+- Ne traduis jamais les noms des plats traditionnels
 
 EXEMPLES CORRECTS:
-User: "Bonjour"
-Sarah: "Salut ! Comment je peux t'aider aujourd'hui ?"
-
-User: "Je veux faire une harira"
-Sarah: "Super ! La harira c'est parfait pour l'hiver. Je te guide étape par étape ?"
-
-EXEMPLES INTERDITS:
-❌ "Salut mon chéri !"
-❌ "Bonjour BOBO !"
-❌ "Coucou ma belle !"
-❌ "Fourchettes et couteaux étincelle !"
-
-Réponds de manière professionnelle, chaleureuse mais sobre."""
+- "Salut! Qu'est-ce qui te ferait plaisir aujourd'hui?"
+- "Super choix! La Harira, c'est parfait par ce temps. Je te guide?"
+- "Je n'ai pas de sushi, mais j'ai de super recettes de poisson: Poisson Vapeur, Tajine..."
+"""
 
     try:
         completion = client.chat.completions.create(
@@ -3048,90 +3528,224 @@ Réponds de manière professionnelle, chaleureuse mais sobre."""
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input}
             ],
-            temperature=0.6,
-            max_tokens=250
+            temperature=0.7,
+            max_tokens=300
         )
         return completion.choices[0].message.content
     except Exception as e:
-        return f"Erreur technique... 😅"
+        return "Désolée, j'ai un petit souci technique. Réessaie dans un instant!"
 
 def generer_recette_ia(description):
-    """Génère une recette complète via Groq"""
+    """Génère une recette complète via IA"""
     
     system_prompt = """Tu es un chef cuisinier expert bi-culturel France-Maroc.
-
-Génère une recette COMPLÈTE au format JSON avec cette structure EXACTE:
+Génère une recette COMPLÈTE au format JSON VALIDE avec cette structure:
 
 {
   "nom": "Nom de la recette",
   "pays": "🇫🇷 France" ou "🇲🇦 Maroc",
-  "categorie": "Plat principal/Dessert/Entrée/etc",
+  "categorie": "Plat principal/Dessert/Entrée/Soupe",
   "budget_assiette": 2.50,
-  "duree_min": 60,
+  "duree_min": 45,
   "difficulte": "Facile/Moyen/Difficile",
   "saison": "Hiver/Été/Toute",
-  "darija": "Si marocain: traduction/expression en darija",
-  "ingredients": {
-    "ingredient1_kg": 0.5,
-    "ingredient2_kg": 0.3
-  },
-  "etapes": [
-    {
-      "num": 1,
-      "titre": "🔥 Titre étape",
-      "description": "Description détaillée",
-      "temperature": "Feu vif/Four 180°C/etc",
-      "duree": "15 minutes",
-      "astuce": "Conseil pratique"
-    }
-  ],
-  "anecdote": "Histoire ou anecdote culturelle"
+  "ingredients": {"ingredient_kg": 0.5},
+  "etapes": [{"num": 1, "titre": "Titre", "description": "Description", "temperature": "Feu moyen", "duree": "10 min", "astuce": "Conseil"}],
+  "anecdote": "Histoire culturelle"
 }
 
-IMPORTANT:
-- Minimum 5 étapes détaillées
-- Températures et durées précises
-- Une astuce par étape
-- Budget réaliste
-- Si marocain: ajoute expressions darija"""
+IMPORTANT: Retourne UNIQUEMENT le JSON, rien d'autre."""
+
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Crée une recette pour: {description}"}
+            ],
+            temperature=0.8,
+            max_tokens=1500
+        )
+        
+        response = completion.choices[0].message.content
+        
+        # Extraire le JSON
+        json_match = re.search(r'\{[\s\S]*\}', response)
+        if json_match:
+            recette = json.loads(json_match.group())
+            return recette
+        
+        return None
+    except Exception as e:
+        return None
+
+# =============================================================================
+# FONCTION SCAN FRIGO (GROQ VISION)
+# =============================================================================
+
+def analyser_photo_frigo(image_bytes):
+    """Analyse une photo du frigo avec Groq Vision"""
+    try:
+        # Encoder en base64
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+        completion = client.chat.completions.create(
+            model="llama-3.2-90b-vision-preview",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": """Analyse cette photo de frigo/ingrédients. 
+Liste UNIQUEMENT les ingrédients que tu vois clairement, un par ligne.
+Format: ingredient1, ingredient2, ingredient3
+Ne mets rien d'autre que la liste."""
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=500
+        )
+        
+        ingredients_texte = completion.choices[0].message.content
+        # Parser la liste
+        ingredients = [i.strip() for i in ingredients_texte.replace('\n', ',').split(',') if i.strip()]
+        return ingredients
+        
+    except Exception as e:
+        return []
+
+def suggerer_recettes_ingredients(ingredients_disponibles):
+    """Suggère des recettes basées sur les ingrédients disponibles"""
+    if not ingredients_disponibles:
+        return []
+    
+    suggestions = []
+    ingredients_lower = [i.lower() for i in ingredients_disponibles]
+    
+    for nom, recette in RECETTES_DETAILLEES.items():
+        ingredients_recette = list(recette.get('ingredients', {}).keys())
+        
+        # Compter combien d'ingrédients correspondent
+        matches = 0
+        for ing_recette in ingredients_recette:
+            ing_clean = ing_recette.lower().replace('_kg', '').replace('_', ' ')
+            for ing_dispo in ingredients_lower:
+                if ing_clean in ing_dispo or ing_dispo in ing_clean:
+                    matches += 1
+                    break
+        
+        if matches > 0:
+            pourcentage = (matches / len(ingredients_recette)) * 100
+            suggestions.append((nom, pourcentage, recette))
+    
+    # Trier par pourcentage décroissant
+    suggestions.sort(key=lambda x: x[1], reverse=True)
+    
+    return [(s[0], s[1], s[2]) for s in suggestions[:5]]
+
+
+# =============================================================================
+# FONCTION AFFICHAGE ÉTAPES CUISINE
+# =============================================================================
+
+def afficher_etape_cuisine():
+    """Affiche l'étape actuelle de la recette en cours"""
+    if not st.session_state.recette_en_cours or not st.session_state.mode_cuisine:
+        return
+    
+    recette = RECETTES_DETAILLEES.get(st.session_state.recette_en_cours)
+    if not recette:
+        return
+    
+    etapes = recette.get('etapes', [])
+    if not etapes:
+        return
+    
+    idx = st.session_state.etape_cuisine
+    if idx >= len(etapes):
+        idx = len(etapes) - 1
+        st.session_state.etape_cuisine = idx
+    
+    etape = etapes[idx]
+    
+    # Affichage de l'étape
+    st.markdown(f"""
+    <div class="etape-box">
+        <h2>{etape.get('titre', f'Étape {idx + 1}')}</h2>
+        <p style="font-size: 20px; line-height: 1.6; margin: 20px 0;">
+            {etape.get('description', '')}
+        </p>
+        <div style="display: flex; justify-content: center; gap: 30px; margin-top: 20px;">
+            <div style="background: rgba(255,255,255,0.2); padding: 10px 20px; border-radius: 10px;">
+                🌡️ {etape.get('temperature', 'N/A')}
+            </div>
+            <div style="background: rgba(255,255,255,0.2); padding: 10px 20px; border-radius: 10px;">
+                ⏱️ {etape.get('duree', 'N/A')}
+            </div>
+        </div>
+        <div style="background: rgba(255,200,55,0.3); padding: 15px; border-radius: 10px; margin-top: 20px;">
+            💡 <strong>Astuce:</strong> {etape.get('astuce', '')}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Lire l'étape à voix haute
+    texte_vocal = f"{etape.get('titre', '')}. {etape.get('description', '')}. Astuce: {etape.get('astuce', '')}"
+    lire_texte_vocal(texte_vocal)
+
+# =============================================================================
+# CSS PROFESSIONNEL
+# =============================================================================
+
 def get_professional_css():
-    """CSS Design Professionnel - Couleurs chaudes cuisine"""
+    """CSS Design Professionnel"""
     return """
     <style>
-    /* RESET & BASE */
-    * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
+    /* VARIABLES */
+    :root {
+        --orange: #FF6B35;
+        --orange-light: #F7931E;
+        --yellow: #FFC837;
+        --purple: #667eea;
+        --purple-dark: #764ba2;
+        --green: #11998e;
+        --pink: #f093fb;
     }
     
-    /* GRADIENTS CHAUDS */
+    /* GRADIENTS */
     .gradient-header {
-        background: linear-gradient(135deg, #FF6B35 0%, #F7931E 50%, #FFC837 100%);
-        padding: 30px;
+        background: linear-gradient(135deg, var(--orange) 0%, var(--orange-light) 50%, var(--yellow) 100%);
+        padding: 25px;
         border-radius: 20px;
-        margin-bottom: 30px;
+        margin-bottom: 25px;
         box-shadow: 0 10px 40px rgba(255, 107, 53, 0.3);
     }
     
-    /* CARDS MODERNES */
+    /* CARDS */
     .card {
         background: white;
         border-radius: 15px;
-        padding: 25px;
+        padding: 20px;
         margin: 15px 0;
         box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        transition: transform 0.3s ease;
     }
     
     .card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 30px rgba(255, 107, 53, 0.2);
+        transform: translateY(-3px);
     }
     
-    /* MÉTÉO CARD */
+    /* MÉTÉO */
     .weather-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, var(--purple) 0%, var(--purple-dark) 100%);
         color: white;
         border-radius: 15px;
         padding: 20px;
@@ -3145,20 +3759,14 @@ def get_professional_css():
         margin: 10px 0;
     }
     
-    .weather-desc {
-        font-size: 18px;
-        opacity: 0.9;
-    }
-    
-    /* SARAH AVATAR & MESSAGE */
+    /* SARAH */
     .sarah-welcome {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        background: linear-gradient(135deg, var(--pink) 0%, #f5576c 100%);
         color: white;
         border-radius: 20px;
         padding: 30px;
         margin: 20px 0;
         box-shadow: 0 10px 30px rgba(240, 147, 251, 0.3);
-        position: relative;
     }
     
     .sarah-avatar {
@@ -3171,165 +3779,67 @@ def get_professional_css():
         justify-content: center;
         font-size: 40px;
         margin: 0 auto 15px;
-        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
     }
     
     .sarah-message {
-        font-size: 24px;
+        font-size: 22px;
         font-weight: 500;
         text-align: center;
         line-height: 1.5;
     }
     
-    /* RECETTES CARDS */
-    .recette-card {
-        background: white;
-        border-radius: 15px;
-        overflow: hidden;
-        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
-        transition: all 0.3s ease;
-        cursor: pointer;
-    }
-    
-    .recette-card:hover {
-        transform: scale(1.05);
-        box-shadow: 0 10px 30px rgba(255, 107, 53, 0.3);
-    }
-    
-    .recette-image {
-        width: 100%;
-        height: 200px;
-        background: linear-gradient(135deg, #FF6B35 0%, #F7931E 100%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 60px;
-    }
-    
-    .recette-content {
-        padding: 20px;
-    }
-    
-    .recette-title {
-        font-size: 20px;
-        font-weight: bold;
-        color: #FF6B35;
-        margin-bottom: 10px;
-    }
-    
-    .recette-info {
-        display: flex;
-        gap: 15px;
-        font-size: 14px;
-        color: #666;
-    }
-    
-    /* MICRO PROFESSIONNEL */
-    .micro-container {
-        background: linear-gradient(135deg, #FF6B35 0%, #F7931E 100%);
-        border-radius: 20px;
-        padding: 25px;
-        text-align: center;
-        box-shadow: 0 10px 30px rgba(255, 107, 53, 0.3);
-        position: sticky;
-        bottom: 20px;
-        margin-top: 30px;
-    }
-    
-    .micro-title {
-        color: white;
-        font-size: 20px;
-        font-weight: bold;
-        margin-bottom: 15px;
-    }
-    
     /* COMPARATEUR */
     .comparateur-card {
-        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        background: linear-gradient(135deg, var(--green) 0%, #38ef7d 100%);
         color: white;
         border-radius: 15px;
         padding: 20px;
         margin: 15px 0;
-        box-shadow: 0 8px 25px rgba(17, 153, 142, 0.3);
     }
     
     .prix-badge {
         background: white;
-        color: #11998e;
+        color: var(--green);
         padding: 8px 15px;
         border-radius: 20px;
         font-weight: bold;
         display: inline-block;
-        margin: 5px;
     }
     
     /* GPS BUTTON */
     .gps-button {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        background: linear-gradient(135deg, var(--pink) 0%, #f5576c 100%);
         color: white;
-        padding: 15px 30px;
-        border-radius: 30px;
+        padding: 12px 25px;
+        border-radius: 25px;
         text-decoration: none;
-        font-size: 18px;
         font-weight: bold;
         display: inline-block;
-        box-shadow: 0 8px 20px rgba(240, 147, 251, 0.4);
-        transition: all 0.3s ease;
+        margin-top: 10px;
     }
     
-    .gps-button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 12px 30px rgba(240, 147, 251, 0.5);
+    /* MICRO */
+    .micro-container {
+        background: linear-gradient(135deg, var(--orange) 0%, var(--orange-light) 100%);
+        border-radius: 20px;
+        padding: 20px;
+        text-align: center;
+        margin-top: 20px;
     }
     
-    /* ANIMATIONS */
-    @keyframes slideIn {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    .animate-slide {
-        animation: slideIn 0.5s ease-out;
-    }
-    
-    /* CHAT MESSAGES */
-    .message-user {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    .micro-title {
         color: white;
-        padding: 15px 20px;
-        border-radius: 20px 20px 5px 20px;
-        margin: 10px 0;
-        max-width: 80%;
-        float: right;
-        clear: both;
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 10px;
     }
     
-    .message-assistant {
-        background: linear-gradient(135deg, #FF6B35 0%, #F7931E 100%);
-        color: white;
-        padding: 15px 20px;
-        border-radius: 20px 20px 20px 5px;
-        margin: 10px 0;
-        max-width: 80%;
-        float: left;
-        clear: both;
-        box-shadow: 0 5px 15px rgba(255, 107, 53, 0.3);
-    }
-    
-    /* BOÎTE ÉTAPES CUISINE */
+    /* ÉTAPES */
     .etape-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, var(--purple) 0%, var(--purple-dark) 100%);
         color: white;
         padding: 30px;
         border-radius: 15px;
-        font-size: 20px;
         text-align: center;
         margin: 20px 0;
         box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
@@ -3337,56 +3847,90 @@ def get_professional_css():
     
     .etape-box h2 {
         color: white !important;
-        font-size: 28px;
+        font-size: 26px;
         margin-bottom: 15px;
     }
     
-    .etape-box h3 {
-        color: #FFC837;
-        font-size: 24px;
+    /* MESSAGES */
+    .message-user {
+        background: linear-gradient(135deg, var(--purple) 0%, var(--purple-dark) 100%);
+        color: white;
+        padding: 15px 20px;
+        border-radius: 20px 20px 5px 20px;
         margin: 10px 0;
+        max-width: 80%;
+        float: right;
+        clear: both;
     }
     
-    .etape-box p {
-        font-size: 18px;
-        line-height: 1.6;
+    .message-assistant {
+        background: linear-gradient(135deg, var(--orange) 0%, var(--orange-light) 100%);
+        color: white;
+        padding: 15px 20px;
+        border-radius: 20px 20px 20px 5px;
         margin: 10px 0;
+        max-width: 80%;
+        float: left;
+        clear: both;
     }
     
-    /* RESPONSIF */
+    /* ANIMATIONS */
+    @keyframes slideIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .animate-slide {
+        animation: slideIn 0.5s ease-out;
+    }
+    
+    /* RESPONSIVE */
     @media (max-width: 768px) {
-        .weather-temp {
-            font-size: 36px;
-        }
-        .sarah-message {
-            font-size: 20px;
-        }
-        .recette-image {
-            height: 150px;
-        }
+        .weather-temp { font-size: 36px; }
+        .sarah-message { font-size: 18px; }
+        .etape-box h2 { font-size: 22px; }
+        .etape-box p { font-size: 16px; }
+    }
+    
+    /* ALLERGIE WARNING */
+    .allergie-warning {
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+        color: white;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+    }
+    
+    /* SUGGESTION CARD */
+    .suggestion-card {
+        background: linear-gradient(135deg, #a8e6cf 0%, #88d8b0 100%);
+        color: #2d5a3d;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 5px 0;
+        cursor: pointer;
+    }
+    
+    .suggestion-card:hover {
+        transform: scale(1.02);
     }
     </style>
     """
 
+# =============================================================================
+# FONCTION PRINCIPALE
+# =============================================================================
 
 def main():
-    # Config page
-    st.set_page_config(
-        page_title="Sarah'Miam - Chef Personnel",
-        page_icon="🍽️",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+    """Fonction principale de l'application"""
     
-    # CSS Professionnel
-    css = get_professional_css()
-    st.markdown(css, unsafe_allow_html=True)
+    # CSS
+    st.markdown(get_professional_css(), unsafe_allow_html=True)
     
-    # GÉOLOCALISATION HTML5 (pour mobile)
-    geo_html = obtenir_geolocalisation_html5()
-    st.markdown(geo_html, unsafe_allow_html=True)
+    # Géolocalisation HTML5
+    st.markdown(obtenir_geolocalisation_html5(), unsafe_allow_html=True)
     
-    # Récupérer ville depuis GPS si disponible
+    # Récupérer ville depuis URL si disponible
     try:
         ville_gps = st.query_params.get('ville_gps', None)
         if ville_gps and ville_gps != st.session_state.ville_utilisateur:
@@ -3395,19 +3939,26 @@ def main():
     except:
         pass
     
-    # HEADER GRADIENT
+    # Si pas de ville, essayer via IP
+    if not st.session_state.ville_utilisateur:
+        ville_ip = obtenir_ville_via_ip()
+        if ville_ip:
+            st.session_state.ville_utilisateur = ville_ip
+            st.session_state.profil['ville'] = ville_ip
+    
+    # HEADER
     st.markdown("""
     <div class="gradient-header">
-        <h1 style="color: white; text-align: center; font-size: 48px; margin: 0;">
+        <h1 style="color: white; text-align: center; font-size: 42px; margin: 0;">
             🍽️ SARAH'MIAM
         </h1>
-        <p style="color: white; text-align: center; font-size: 20px; margin-top: 10px; opacity: 0.9;">
+        <p style="color: white; text-align: center; font-size: 18px; margin-top: 10px; opacity: 0.9;">
             Ton chef personnel France-Maroc 🇫🇷 🇲🇦
         </p>
     </div>
     """, unsafe_allow_html=True)
     
-    # GÉOLOCALISATION + MÉTÉO
+    # MÉTÉO + DATE
     ville = st.session_state.ville_utilisateur or "France"
     meteo = obtenir_meteo()
     
@@ -3417,16 +3968,16 @@ def main():
         if meteo:
             st.markdown(f"""
             <div class="weather-card animate-slide">
-                <div style="font-size: 20px; font-weight: bold;">📍 {meteo['ville']}</div>
+                <div style="font-size: 18px; font-weight: bold;">📍 {meteo['ville']}</div>
                 <div class="weather-temp">{meteo['temp']}°C</div>
-                <div class="weather-desc">{meteo['description']}</div>
+                <div>{meteo['description']}</div>
             </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
             <div class="weather-card animate-slide">
-                <div style="font-size: 20px; font-weight: bold;">📍 {ville}</div>
-                <div style="font-size: 16px; margin-top: 10px;">Bienvenue !</div>
+                <div style="font-size: 18px; font-weight: bold;">📍 {ville}</div>
+                <div style="font-size: 14px; margin-top: 10px;">Bienvenue!</div>
             </div>
             """, unsafe_allow_html=True)
     
@@ -3435,10 +3986,10 @@ def main():
         st.markdown(f"""
         <div class="card animate-slide">
             <div style="text-align: center;">
-                <div style="font-size: 24px; color: #FF6B35; font-weight: bold;">
+                <div style="font-size: 22px; color: #FF6B35; font-weight: bold;">
                     📅 {now.strftime('%d %B %Y')}
                 </div>
-                <div style="font-size: 20px; color: #666; margin-top: 5px;">
+                <div style="font-size: 18px; color: #666; margin-top: 5px;">
                     ⏰ {now.strftime('%H:%M')}
                 </div>
             </div>
@@ -3446,56 +3997,95 @@ def main():
         """, unsafe_allow_html=True)
     
     with col3:
-        # Bouton changer ville
-        if st.button("📍 Ville", use_container_width=True):
+        if st.button("📍 Changer ville", use_container_width=True):
             st.session_state.show_ville = not st.session_state.get('show_ville', False)
     
+    # Champ pour changer de ville
     if st.session_state.get('show_ville', False):
-        nv = st.text_input("Ta ville:", key="change_ville_pro")
-        if st.button("✅ OK") and nv:
-            st.session_state.ville_utilisateur = nv
-            st.session_state.profil['ville'] = nv
+        nouvelle_ville = st.text_input("Ta ville:", key="input_ville")
+        if st.button("✅ Valider") and nouvelle_ville:
+            st.session_state.ville_utilisateur = nouvelle_ville
+            st.session_state.profil['ville'] = nouvelle_ville
             st.session_state.show_ville = False
+            st.session_state.meteo_cache = None  # Reset cache météo
             st.rerun()
     
-    # BIENVENUE SARAH (si premier message)
+    # Suggestions météo
+    if meteo:
+        suggestions_meteo = suggestion_meteo(meteo)
+        if suggestions_meteo:
+            st.markdown(f"""
+            <div class="suggestion-card">
+                🌤️ <strong>Suggestions du jour:</strong> {', '.join(suggestions_meteo)}
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # MESSAGE BIENVENUE
     if len(st.session_state.historique) == 0:
-        msg_bienvenue = "Marhaba ! Je suis Sarah, ton chef personnel France-Maroc ! Qu'est-ce qui te ferait plaisir aujourd'hui ?"
+        prenom = st.session_state.profil.get('nom', '')
+        if prenom:
+            msg = f"Marhaba {prenom}! Qu'est-ce qui te ferait plaisir aujourd'hui?"
+        else:
+            msg = "Marhaba! Je suis Sarah, ton chef personnel France-Maroc! Qu'est-ce qui te ferait plaisir?"
         
         st.markdown(f"""
         <div class="sarah-welcome animate-slide">
             <div class="sarah-avatar">👩‍🍳</div>
-            <div class="sarah-message">{msg_bienvenue}</div>
+            <div class="sarah-message">{msg}</div>
         </div>
         """, unsafe_allow_html=True)
         
-        # Vocal bienvenue UNE SEULE FOIS
         if not st.session_state.get('bienvenue_jouee', False):
-            lire_texte_vocal(msg_bienvenue)
+            lire_texte_vocal(msg)
             st.session_state.bienvenue_jouee = True
     
     # SIDEBAR
     with st.sidebar:
-        st.markdown("### 👤 Profil")
-        nom = st.text_input("Prénom:", value=st.session_state.profil.get('nom', 'Utilisateur'), key="prof_nom")
+        st.markdown("### 👤 Mon Profil")
+        
+        # Prénom
+        nom = st.text_input("Prénom:", value=st.session_state.profil.get('nom', ''), key="input_nom")
         if nom != st.session_state.profil.get('nom'):
             st.session_state.profil['nom'] = nom
         
+        # Nombre de personnes
+        st.session_state.nb_personnes = st.number_input(
+            "Nombre de personnes:", 
+            min_value=1, 
+            max_value=20, 
+            value=st.session_state.nb_personnes,
+            key="input_nb_pers"
+        )
+        
+        # Allergies
+        st.markdown("#### ⚠️ Allergies")
+        allergies_options = list(ALLERGENES.keys())
+        allergies_selectionnees = st.multiselect(
+            "Sélectionne tes allergies:",
+            allergies_options,
+            default=st.session_state.profil.get('allergies', []),
+            key="input_allergies"
+        )
+        st.session_state.profil['allergies'] = allergies_selectionnees
+        
         st.markdown("---")
+        
+        # COMPARATEUR
         st.markdown("### 🛒 Comparateur Prix")
         
-        rec_comp = st.selectbox("Recette:", [""] + list(RECETTES_DETAILLEES.keys())[:10], key="comp_rec")
+        recettes_list = list(RECETTES_DETAILLEES.keys())
+        rec_comp = st.selectbox("Choisir une recette:", [""] + recettes_list, key="select_comp")
         
-        if rec_comp and st.button("💰 Comparer", key="btn_comp"):
-            rec = RECETTES_DETAILLEES[rec_comp]
-            comp, _ = comparer_prix(rec['ingredients'])
+        if rec_comp and st.button("💰 Comparer les prix", key="btn_comp"):
+            recette = RECETTES_DETAILLEES[rec_comp]
+            comp, _ = comparer_prix(recette['ingredients'])
             
             meilleur = list(comp.keys())[0]
             
             st.markdown(f"""
             <div class="comparateur-card">
-                <div style="font-size: 20px; font-weight: bold; margin-bottom: 15px;">
-                    🏆 Meilleur prix: {meilleur}
+                <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">
+                    🏆 Meilleur: {meilleur}
                 </div>
                 <div class="prix-badge">{comp[meilleur]}€</div>
             </div>
@@ -3504,23 +4094,34 @@ def main():
             for ens, px in comp.items():
                 st.write(f"• {ens}: {px}€")
             
+            # Lien GPS
             if ville and meilleur in LIENS_ENSEIGNES:
                 lien = LIENS_ENSEIGNES[meilleur]['gps'].format(ville=ville)
-                st.markdown(f"""
-                <a href="{lien}" target="_blank" class="gps-button">
-                    🚗 Y ALLER À {ville.upper()}
-                </a>
-                """, unsafe_allow_html=True)
+                st.markdown(f'<a href="{lien}" target="_blank" class="gps-button">🚗 Y aller à {ville}</a>', unsafe_allow_html=True)
         
         st.markdown("---")
-        st.markdown("### 📖 Recettes Populaires")
         
-        # Top 6 recettes avec cards
-        for nom, rec in list(RECETTES_DETAILLEES.items())[:6]:
-            with st.expander(f"{rec['pays']} {nom}"):
-                st.write(f"💰 {rec['budget_assiette']}€ · ⏱️ {rec['duree_min']}min")
-                if st.button("🍳 Cuisiner", key=f"cook_{nom}"):
-                    st.session_state.recette_en_cours = nom
+        # RECETTES
+        st.markdown("### 📖 Recettes")
+        
+        # Filtres
+        filtre_pays = st.radio("Filtrer:", ["Toutes", "🇲🇦 Maroc", "🇫🇷 France"], horizontal=True, key="filtre_pays")
+        
+        for nom_rec, rec in RECETTES_DETAILLEES.items():
+            if filtre_pays != "Toutes" and filtre_pays not in rec['pays']:
+                continue
+            
+            # Vérifier allergies
+            ok, allergenes = verifier_allergenes(nom_rec, allergies_selectionnees)
+            
+            with st.expander(f"{rec['pays'][:2]} {nom_rec}"):
+                st.write(f"💰 {rec['budget_assiette']}€ · ⏱️ {rec['duree_min']}min · {rec['difficulte']}")
+                
+                if not ok:
+                    st.warning(f"⚠️ Contient: {', '.join(allergenes)}")
+                
+                if st.button("🍳 Cuisiner", key=f"cook_{nom_rec}"):
+                    st.session_state.recette_en_cours = nom_rec
                     st.session_state.mode_cuisine = True
                     st.session_state.etape_cuisine = 0
                     st.rerun()
@@ -3533,33 +4134,59 @@ def main():
         st.markdown(f"""
         <div class="card">
             <h2 style="color: #FF6B35; text-align: center;">🍳 {rec_nom}</h2>
-            <p style="text-align: center; color: #666;">{rec['pays']} · {rec['categorie']}</p>
+            <p style="text-align: center; color: #666;">{rec['pays']} · {rec['categorie']} · {rec['duree_min']} min</p>
         </div>
         """, unsafe_allow_html=True)
         
+        # Bouton quitter mode cuisine
+        if st.button("❌ Quitter la recette"):
+            st.session_state.mode_cuisine = False
+            st.session_state.recette_en_cours = None
+            st.rerun()
+        
+        # Navigation étapes
         col1, col2, col3 = st.columns([1, 2, 1])
+        
         with col1:
-            if st.button("⬅️ Préc") and st.session_state.etape_cuisine > 0:
+            if st.button("⬅️ Précédent") and st.session_state.etape_cuisine > 0:
                 st.session_state.etape_cuisine -= 1
                 st.rerun()
+        
         with col2:
-            st.markdown(f"<div style='text-align: center; font-size: 18px; font-weight: bold;'>Étape {st.session_state.etape_cuisine + 1}/{len(rec['etapes'])}</div>", unsafe_allow_html=True)
+            nb_etapes = len(rec['etapes'])
+            st.markdown(f"<div style='text-align: center; font-size: 18px; font-weight: bold;'>Étape {st.session_state.etape_cuisine + 1} / {nb_etapes}</div>", unsafe_allow_html=True)
+        
         with col3:
             if st.session_state.etape_cuisine < len(rec['etapes']) - 1:
-                if st.button("Suiv ➡️"):
+                if st.button("Suivant ➡️"):
                     st.session_state.etape_cuisine += 1
                     st.rerun()
             else:
-                if st.button("✅ Fini"):
+                if st.button("✅ Terminé!"):
                     st.session_state.mode_cuisine = False
+                    st.session_state.recette_en_cours = None
                     st.balloons()
+                    st.success(f"Bravo! Tu as terminé {rec_nom}! Bsaha! 🎉")
                     st.rerun()
         
+        # Afficher l'étape
         afficher_etape_cuisine()
+        
+        # Timer rapide
+        st.markdown("---")
+        st.markdown("### ⏱️ Timer rapide")
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            timer_min = st.number_input("Minutes:", min_value=1, max_value=120, value=10, key="timer_min")
+        with col_t2:
+            timer_nom = st.text_input("Nom:", value="Cuisson", key="timer_nom")
+        
+        if st.button("▶️ Lancer timer"):
+            st.components.v1.html(creer_timer_html(timer_min, timer_nom), height=150)
     
-    # CONVERSATION
+    # MODE CONVERSATION
     else:
-        # Historique messages
+        # Historique
         for entry in st.session_state.historique[-10:]:
             role_class = "message-user" if entry['role'] == 'user' else "message-assistant"
             st.markdown(f"""
@@ -3569,7 +4196,7 @@ def main():
             <div style="clear: both;"></div>
             """, unsafe_allow_html=True)
     
-    # MICRO CONTAINER FIXE
+    # ZONE INPUT
     st.markdown("""
     <div class="micro-container">
         <div class="micro-title">🎤 Parle à Sarah ou écris</div>
@@ -3585,39 +4212,138 @@ def main():
             neutral_color="#FF6B35",
             icon_name="microphone",
             icon_size="3x",
-            key="audio_pro"
+            key="audio_main"
         )
         
-        audio_hash = hash(audio_bytes) if audio_bytes else None
-        
-        if audio_bytes and audio_hash != st.session_state.last_audio_hash:
-            st.session_state.last_audio_hash = audio_hash
-            
-            with st.spinner("🎤"):
-                text_audio = transcribe_audio_whisper(audio_bytes)
-            
-            if text_audio and len(text_audio) > 2:
-                st.session_state.historique.append({'role': 'user', 'content': text_audio})
+        if audio_bytes:
+            audio_hash = hash(audio_bytes)
+            if audio_hash != st.session_state.last_audio_hash:
+                st.session_state.last_audio_hash = audio_hash
                 
-                with st.spinner("💭"):
-                    reponse = demander_sarah(text_audio)
+                with st.spinner("🎤 Transcription..."):
+                    text_audio = transcribe_audio_whisper(audio_bytes)
                 
-                st.session_state.historique.append({'role': 'assistant', 'content': reponse})
-                lire_texte_vocal(reponse)
-                st.rerun()
+                if text_audio and len(text_audio) > 2:
+                    # Détecter allergies
+                    allergies_detectees = detecter_allergies(text_audio)
+                    if allergies_detectees:
+                        for a in allergies_detectees:
+                            if a not in st.session_state.profil['allergies']:
+                                st.session_state.profil['allergies'].append(a)
+                        st.info(f"🔔 J'ai noté tes allergies: {', '.join(allergies_detectees)}")
+                    
+                    st.session_state.historique.append({'role': 'user', 'content': text_audio})
+                    
+                    # Détecter stress
+                    if detecter_stress(text_audio):
+                        recettes_faciles = recettes_anti_stress()
+                        reponse = f"Je vois que tu es pressé! Voici des recettes rapides et faciles: {', '.join(recettes_faciles)}. Laquelle te tente?"
+                    else:
+                        with st.spinner("💭 Sarah réfléchit..."):
+                            reponse = demander_sarah(text_audio)
+                    
+                    st.session_state.historique.append({'role': 'assistant', 'content': reponse})
+                    lire_texte_vocal(reponse)
+                    st.rerun()
     
     with col_txt:
-        user_input = st.chat_input("Écris ta question...", key="chat_pro")
+        user_input = st.chat_input("Écris ta question...", key="chat_main")
         
         if user_input:
+            # Détecter allergies
+            allergies_detectees = detecter_allergies(user_input)
+            if allergies_detectees:
+                for a in allergies_detectees:
+                    if a not in st.session_state.profil['allergies']:
+                        st.session_state.profil['allergies'].append(a)
+            
             st.session_state.historique.append({'role': 'user', 'content': user_input})
             
-            with st.spinner("💭"):
-                reponse = demander_sarah(user_input)
+            # Détecter stress
+            if detecter_stress(user_input):
+                recettes_faciles = recettes_anti_stress()
+                reponse = f"Je vois que tu es pressé! Voici des recettes rapides: {', '.join(recettes_faciles)}. Laquelle te tente?"
+            else:
+                with st.spinner("💭 Sarah réfléchit..."):
+                    reponse = demander_sarah(user_input)
             
             st.session_state.historique.append({'role': 'assistant', 'content': reponse})
             lire_texte_vocal(reponse)
             st.rerun()
+    
+    # FONCTIONNALITÉS SUPPLÉMENTAIRES
+    st.markdown("---")
+    
+    with st.expander("📸 Scan Frigo (Anti-gaspi)"):
+        st.markdown("Prends une photo de ton frigo et je te suggère des recettes!")
+        uploaded_file = st.file_uploader("Photo du frigo:", type=['jpg', 'jpeg', 'png'], key="upload_frigo")
+        
+        if uploaded_file:
+            image_bytes = uploaded_file.read()
+            st.image(image_bytes, caption="Ta photo", use_container_width=True)
+            
+            if st.button("🔍 Analyser"):
+                with st.spinner("🔍 Analyse en cours..."):
+                    ingredients = analyser_photo_frigo(image_bytes)
+                
+                if ingredients:
+                    st.success(f"Ingrédients détectés: {', '.join(ingredients)}")
+                    
+                    suggestions = suggerer_recettes_ingredients(ingredients)
+                    if suggestions:
+                        st.markdown("### 🍳 Recettes possibles:")
+                        for nom, pourcent, rec in suggestions:
+                            st.markdown(f"- **{nom}** ({pourcent:.0f}% des ingrédients)")
+                else:
+                    st.warning("Je n'ai pas pu identifier d'ingrédients. Essaie avec une meilleure photo!")
+    
+    with st.expander("🔄 Convertisseur"):
+        st.markdown("Convertis tes mesures culinaires!")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            valeur = st.number_input("Valeur:", min_value=0.0, value=100.0, key="conv_val")
+        with col2:
+            de_unite = st.selectbox("De:", ["g", "ml", "tasse", "cuillere_soupe", "celsius", "oz", "kg", "lb"], key="conv_de")
+        with col3:
+            vers_unite = st.selectbox("Vers:", ["tasse_farine", "tasse_sucre", "tasse", "ml", "fahrenheit", "g", "lb", "kg"], key="conv_vers")
+        
+        if st.button("Convertir"):
+            resultat = convertir_mesure(valeur, de_unite, vers_unite)
+            if resultat:
+                st.success(f"✅ {valeur} {de_unite} = **{resultat} {vers_unite}**")
+            else:
+                st.error("Conversion non disponible pour ces unités")
+    
+    with st.expander("💡 Suggestions intelligentes"):
+        st.markdown("Trouve la recette parfaite selon tes critères!")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            budget_filtre = st.slider("Budget max (€/pers):", 0.5, 5.0, 3.0, 0.5, key="filtre_budget")
+            temps_filtre = st.slider("Temps max (min):", 15, 180, 60, 15, key="filtre_temps")
+        with col2:
+            diff_filtre = st.selectbox("Difficulté:", ["", "Facile", "Moyen", "Difficile"], key="filtre_diff")
+            saison_filtre = st.selectbox("Saison:", ["", "Hiver", "Été", "Toute"], key="filtre_saison")
+        
+        if st.button("🔍 Chercher"):
+            suggestions = suggerer_recettes(
+                budget_max=budget_filtre,
+                temps_max=temps_filtre,
+                difficulte=diff_filtre if diff_filtre else None,
+                saison=saison_filtre if saison_filtre else None
+            )
+            
+            if suggestions:
+                st.markdown("### Recettes suggérées:")
+                for nom, rec in suggestions:
+                    st.markdown(f"- **{nom}** - {rec['budget_assiette']}€ · {rec['duree_min']}min · {rec['difficulte']}")
+            else:
+                st.info("Aucune recette ne correspond à ces critères. Essaie d'élargir ta recherche!")
+
+# =============================================================================
+# LANCEMENT
+# =============================================================================
 
 if __name__ == "__main__":
     main()
