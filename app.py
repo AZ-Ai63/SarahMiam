@@ -2634,8 +2634,21 @@ def lire_texte_vocal(texte):
     if not texte or len(texte) < 3:
         return
     
-    # Nettoyer le texte
-    texte_clean = texte.replace("'", "'").replace('"', ' ').replace('\n', ' ').replace('`', ' ').strip()
+    # Nettoyer le texte - ENLEVER EMOJIS
+    import re
+    # Supprimer emojis (unicode emoji ranges)
+    emoji_pattern = re.compile("["
+        u"\U0001F600-\U0001F64F"  # emoticons
+        u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+        u"\U0001F680-\U0001F6FF"  # transport & map symbols
+        u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        u"\U00002702-\U000027B0"
+        u"\U000024C2-\U0001F251"
+        "]+", flags=re.UNICODE)
+    texte_clean = emoji_pattern.sub('', texte)
+    
+    # Nettoyer caractères spéciaux
+    texte_clean = texte_clean.replace("'", "'").replace('"', ' ').replace('\n', ' ').replace('`', ' ').strip()
     texte_clean = texte_clean[:300]  # Max 300 caractères
     
     # ID unique
