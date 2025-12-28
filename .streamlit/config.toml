@@ -1,1 +1,65 @@
+[browser]
+gatherUsageStats = false
 
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[theme]
+primaryColor = "#FF6B35"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#FFF8F0"
+textColor = "#1E1E1E"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = false
+```
+
+5. Clique **"Commit new file"**
+
+---
+
+### 3. CRÉER `.gitignore`
+
+1. Clique **"Add file"** → **"Create new file"**
+2. Nom : **`.gitignore`**
+3. Colle :
+```
+# Secrets - NE JAMAIS COMMIT
+.streamlit/secrets.toml
+secrets.toml
+*.env
+.env
+
+# Python
+__pycache__/
+*.pyc
+```
+
+4. **Commit new file**
+
+---
+
+### 4. CRÉER `README.md` (optionnel mais pro)
+
+1. **"Add file"** → **"Create new file"**
+2. Nom : **`README.md`**
+3. Colle le contenu du README que je t'ai donné
+4. **Commit**
+
+---
+
+### 📁 STRUCTURE FINALE
+
+Après ces étapes, ton repo ressemblera à :
+```
+SarahMiam/
+├── .streamlit/
+│   └── config.toml      ← NOUVEAU
+├── .gitignore           ← NOUVEAU
+├── README.md            ← NOUVEAU (optionnel)
+├── app.py               ← MIS À JOUR
+└── requirements.txt     ← Existant
