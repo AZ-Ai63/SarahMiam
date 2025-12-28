@@ -2530,12 +2530,12 @@ def transcribe_audio_whisper(audio_bytes):
         return None
 
 def lire_texte_vocal(texte):
-    """Synthèse vocale - VERSION STABLE SIMPLE"""
+    """Synthèse vocale - VERSION MOBILE OPTIMISÉE"""
     if not texte or len(texte) < 3:
         return
     
     # Nettoyer le texte
-    texte_clean = texte.replace("'", " ").replace('"', ' ').replace('\n', ' ').strip()
+    texte_clean = texte.replace("'", "'").replace('"', ' ').replace('\n', ' ').replace('`', ' ').strip()
     texte_clean = texte_clean[:300]  # Max 300 caractères
     
     # ID unique
@@ -2545,27 +2545,49 @@ def lire_texte_vocal(texte):
     <div id="speech-{unique_id}"></div>
     <script>
     (function() {{
-        // RESET COMPLET
-        if (window.speechSynthesis) {{
-            window.speechSynthesis.cancel();
-        }}
-        
-        // Attendre que tout soit propre
-        setTimeout(function() {{
-            try {{
-                const text = `{texte_clean}`;
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'fr-FR';
-                utterance.rate = 0.9;
-                utterance.pitch = 1.0;
-                utterance.volume = 1.0;
-                
-                // Parler
-                window.speechSynthesis.speak(utterance);
-            }} catch(e) {{
-                console.log('Audio:', e);
+        try {{
+            // RESET COMPLET
+            if (window.speechSynthesis) {{
+                window.speechSynthesis.cancel();
             }}
-        }}, 500);
+            
+            // Fonction pour lire
+            function speak() {{
+                try {{
+                    const text = `{texte_clean}`;
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'fr-FR';
+                    utterance.rate = 0.9;
+                    utterance.pitch = 1.0;
+                    utterance.volume = 1.0;
+                    
+                    // Attendre les voix
+                    const voices = window.speechSynthesis.getVoices();
+                    const frVoice = voices.find(v => v.lang.startsWith('fr'));
+                    if (frVoice) {{
+                        utterance.voice = frVoice;
+                    }}
+                    
+                    // Parler
+                    window.speechSynthesis.speak(utterance);
+                }} catch(e) {{
+                    console.log('Audio error:', e);
+                }}
+            }}
+            
+            // Sur mobile, les voix se chargent après
+            if (window.speechSynthesis.getVoices().length === 0) {{
+                window.speechSynthesis.onvoiceschanged = function() {{
+                    speak();
+                    window.speechSynthesis.onvoiceschanged = null;
+                }};
+            }} else {{
+                setTimeout(speak, 500);
+            }}
+            
+        }} catch(error) {{
+            console.log('Speech init error:', error);
+        }}
     }})();
     </script>
     """
@@ -2612,6 +2634,50 @@ def obtenir_ville_via_ip():
         pass
     
     return "France"
+
+def obtenir_geolocalisation_html5():
+    """Géolocalisation HTML5 native - Marche sur mobile!"""
+    html_geo = """
+    <script>
+    (function() {
+        // Vérifier si déjà une ville dans l'URL
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('ville_gps')) {
+            return; // Déjà fait
+        }
+        
+        // Demander géolocalisation
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    
+                    // Reverse geocoding avec Nominatim
+                    fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, {
+                        headers: {'User-Agent': 'SarahMiam/1.0'}
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        const ville = data.address.city || data.address.town || data.address.village || '';
+                        if (ville) {
+                            // Recharger avec ville
+                            const params = new URLSearchParams(window.location.search);
+                            params.set('ville_gps', ville);
+                            window.location.search = params.toString();
+                        }
+                    })
+                    .catch(err => console.log('Geocoding:', err));
+                },
+                function(error) {
+                    console.log('Géoloc refusée');
+                }
+            );
+        }
+    })();
+    </script>
+    """
+    return html_geo
 
 def reverse_geocoding(lat, lon):
     """Convertir lat/lon en ville avec Nominatim (gratuit)"""
@@ -3157,6 +3223,19 @@ def main():
     # CSS Professionnel
     css = get_professional_css()
     st.markdown(css, unsafe_allow_html=True)
+    
+    # GÉOLOCALISATION HTML5 (pour mobile)
+    geo_html = obtenir_geolocalisation_html5()
+    st.markdown(geo_html, unsafe_allow_html=True)
+    
+    # Récupérer ville depuis GPS si disponible
+    try:
+        ville_gps = st.query_params.get('ville_gps', None)
+        if ville_gps and ville_gps != st.session_state.ville_utilisateur:
+            st.session_state.ville_utilisateur = ville_gps
+            st.session_state.profil['ville'] = ville_gps
+    except:
+        pass
     
     # HEADER GRADIENT
     st.markdown("""
