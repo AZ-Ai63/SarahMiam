@@ -58,6 +58,52 @@ st.set_page_config(
 )
 
 # =============================================================================
+# META TAGS PWA - Pour installation sur téléphone avec le bon nom
+# =============================================================================
+
+st.markdown("""
+<!-- PWA Meta Tags pour installation mobile -->
+<meta name="application-name" content="Sarah'Miam">
+<meta name="apple-mobile-web-app-title" content="Sarah'Miam">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#FF6B35">
+<meta name="msapplication-TileColor" content="#FF6B35">
+<meta name="msapplication-navbutton-color" content="#FF6B35">
+
+<!-- Open Graph pour partage réseaux sociaux -->
+<meta property="og:title" content="Sarah'Miam - Assistant Culinaire">
+<meta property="og:description" content="Ton chef personnel bi-culturel France-Maroc">
+<meta property="og:type" content="website">
+
+<!-- Manifest PWA inline -->
+<link rel="manifest" href="data:application/json,{
+    'name': 'Sarah\\'Miam',
+    'short_name': 'Sarah\\'Miam',
+    'description': 'Assistant culinaire bi-culturel France-Maroc',
+    'start_url': '.',
+    'display': 'standalone',
+    'background_color': '#FFFFFF',
+    'theme_color': '#FF6B35',
+    'icons': [{
+        'src': 'https://em-content.zobj.net/source/apple/391/pot-of-food_1f372.png',
+        'sizes': '120x120',
+        'type': 'image/png'
+    }]
+}">
+
+<style>
+    /* Fix pour que le nom apparaisse bien sur mobile */
+    @media (display-mode: standalone) {
+        header[data-testid="stHeader"] {
+            display: none;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# =============================================================================
 # CONFIGURATION API
 # =============================================================================
 
