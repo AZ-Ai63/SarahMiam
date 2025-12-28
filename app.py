@@ -3294,6 +3294,70 @@ def detecter_stress(texte):
     
     return score_stress >= 2
 
+def detecter_recette_dans_message(texte):
+    """
+    Détecte si l'utilisateur mentionne une recette et veut la préparer.
+    Retourne le nom de la recette si trouvée, None sinon.
+    """
+    texte_lower = texte.lower()
+    
+    # Mots qui indiquent une intention de cuisiner
+    mots_action = [
+        "préparer", "preparer", "faire", "cuisiner", "guide", "guidez",
+        "oui", "ok", "d'accord", "daccord", "allons-y", "go", "commence",
+        "je veux", "j'aimerais", "montre", "aide", "aidez", "aider"
+    ]
+    
+    # Vérifier si c'est une demande d'action
+    est_demande_action = any(mot in texte_lower for mot in mots_action)
+    
+    # Chercher une recette mentionnée
+    recette_trouvee = None
+    meilleur_score = 0
+    
+    for nom_recette in RECETTES_DETAILLEES.keys():
+        nom_lower = nom_recette.lower()
+        
+        # Correspondance exacte ou partielle
+        if nom_lower in texte_lower:
+            score = len(nom_lower)
+            if score > meilleur_score:
+                meilleur_score = score
+                recette_trouvee = nom_recette
+        else:
+            # Chercher les mots clés de la recette
+            mots_recette = nom_lower.split()
+            for mot in mots_recette:
+                if len(mot) > 3 and mot in texte_lower:
+                    score = len(mot)
+                    if score > meilleur_score:
+                        meilleur_score = score
+                        recette_trouvee = nom_recette
+    
+    # Si on a trouvé une recette ET c'est une demande d'action, lancer
+    if recette_trouvee and est_demande_action:
+        return recette_trouvee
+    
+    # Si le message est juste "oui" ou confirmation, vérifier l'historique
+    if texte_lower.strip() in ["oui", "ok", "oui.", "ok.", "d'accord", "yes", "yep", "ouais", "go", "allons-y", "oui ?"]:
+        # Chercher la dernière recette mentionnée dans l'historique
+        for entry in reversed(st.session_state.historique[-6:]):
+            if entry['role'] == 'assistant':
+                for nom_recette in RECETTES_DETAILLEES.keys():
+                    if nom_recette.lower() in entry['content'].lower():
+                        return nom_recette
+    
+    return recette_trouvee if est_demande_action else None
+
+def lancer_mode_cuisine(nom_recette):
+    """Lance le mode cuisine pour une recette donnée"""
+    if nom_recette in RECETTES_DETAILLEES:
+        st.session_state.recette_en_cours = nom_recette
+        st.session_state.mode_cuisine = True
+        st.session_state.etape_cuisine = 0
+        return True
+    return False
+
 def recettes_anti_stress():
     """Retourne des recettes simples et rapides pour les moments de stress"""
     recettes = []
@@ -4304,17 +4368,31 @@ def main():
                     
                     st.session_state.historique.append({'role': 'user', 'content': text_audio})
                     
-                    # Détecter stress
-                    if detecter_stress(text_audio):
+                    # PRIORITÉ 1: Détecter si l'utilisateur veut lancer une recette
+                    recette_detectee = detecter_recette_dans_message(text_audio)
+                    if recette_detectee:
+                        # Lancer directement le mode cuisine!
+                        lancer_mode_cuisine(recette_detectee)
+                        reponse = f"C'est parti pour {recette_detectee}! Yallah, suis les étapes! 🍳"
+                        st.session_state.historique.append({'role': 'assistant', 'content': reponse})
+                        lire_texte_vocal(reponse)
+                        st.rerun()
+                    
+                    # PRIORITÉ 2: Détecter stress
+                    elif detecter_stress(text_audio):
                         recettes_faciles = recettes_anti_stress()
                         reponse = f"Je vois que tu es pressé! Voici des recettes rapides et faciles: {', '.join(recettes_faciles)}. Laquelle te tente?"
+                        st.session_state.historique.append({'role': 'assistant', 'content': reponse})
+                        lire_texte_vocal(reponse)
+                        st.rerun()
+                    
+                    # PRIORITÉ 3: Conversation normale
                     else:
                         with st.spinner("💭 Sarah réfléchit..."):
                             reponse = demander_sarah(text_audio)
-                    
-                    st.session_state.historique.append({'role': 'assistant', 'content': reponse})
-                    lire_texte_vocal(reponse)
-                    st.rerun()
+                        st.session_state.historique.append({'role': 'assistant', 'content': reponse})
+                        lire_texte_vocal(reponse)
+                        st.rerun()
     
     with col_txt:
         user_input = st.chat_input("Écris ta question...", key="chat_main")
@@ -4329,17 +4407,31 @@ def main():
             
             st.session_state.historique.append({'role': 'user', 'content': user_input})
             
-            # Détecter stress
-            if detecter_stress(user_input):
+            # PRIORITÉ 1: Détecter si l'utilisateur veut lancer une recette
+            recette_detectee = detecter_recette_dans_message(user_input)
+            if recette_detectee:
+                # Lancer directement le mode cuisine!
+                lancer_mode_cuisine(recette_detectee)
+                reponse = f"C'est parti pour {recette_detectee}! Yallah, suis les étapes! 🍳"
+                st.session_state.historique.append({'role': 'assistant', 'content': reponse})
+                lire_texte_vocal(reponse)
+                st.rerun()
+            
+            # PRIORITÉ 2: Détecter stress
+            elif detecter_stress(user_input):
                 recettes_faciles = recettes_anti_stress()
                 reponse = f"Je vois que tu es pressé! Voici des recettes rapides: {', '.join(recettes_faciles)}. Laquelle te tente?"
+                st.session_state.historique.append({'role': 'assistant', 'content': reponse})
+                lire_texte_vocal(reponse)
+                st.rerun()
+            
+            # PRIORITÉ 3: Conversation normale avec Sarah
             else:
                 with st.spinner("💭 Sarah réfléchit..."):
                     reponse = demander_sarah(user_input)
-            
-            st.session_state.historique.append({'role': 'assistant', 'content': reponse})
-            lire_texte_vocal(reponse)
-            st.rerun()
+                st.session_state.historique.append({'role': 'assistant', 'content': reponse})
+                lire_texte_vocal(reponse)
+                st.rerun()
     
     # FONCTIONNALITÉS SUPPLÉMENTAIRES
     st.markdown("---")
