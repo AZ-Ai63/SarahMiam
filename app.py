@@ -2919,50 +2919,98 @@ def obtenir_ville_via_ip():
     return ""
 
 def obtenir_geolocalisation_html5():
-    """Géolocalisation HTML5 pour navigateur - CORRIGÉE"""
+    """Géolocalisation HTML5 pour navigateur - FORCE GPS SUR MOBILE"""
     return """
     <script>
     (function() {
-        // Éviter les exécutions multiples
-        if (window.geoRequested) return;
-        window.geoRequested = true;
+        // Détecter si mobile
+        var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         
-        // Vérifier si déjà une ville dans l'URL
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has('ville_gps') && urlParams.get('ville_gps') !== '') {
+        // Vérifier si déjà une ville GPS (pas IP) dans l'URL
+        var urlParams = new URLSearchParams(window.location.search);
+        var villeExistante = urlParams.get('ville_gps');
+        var sourceGPS = urlParams.get('source_gps');
+        
+        // Liste des villes "fausses" (serveurs cloud)
+        var villesFausses = ['The Dalles', 'Dalles', 'Council Bluffs', 'Ashburn', 'San Francisco', 'undefined', 'null', 'France', ''];
+        
+        // Sur mobile: toujours redemander si la ville semble fausse ou si pas de source GPS
+        if (isMobile) {
+            var estFausse = villesFausses.some(function(v) { 
+                return villeExistante && villeExistante.toLowerCase().indexOf(v.toLowerCase()) !== -1; 
+            });
+            
+            if (!sourceGPS || sourceGPS !== 'gps' || estFausse) {
+                console.log('Mobile détecté, demande GPS...');
+                demanderGPS();
+                return;
+            }
+        }
+        
+        // Sur PC: ne pas redemander si ville existe
+        if (villeExistante && villeExistante.length > 2 && sourceGPS === 'gps') {
+            console.log('Ville GPS déjà définie:', villeExistante);
             return;
         }
         
-        // Demander géolocalisation
-        if (navigator.geolocation) {
+        // Éviter boucle infinie
+        if (window.geoRequestedV5) return;
+        window.geoRequestedV5 = true;
+        
+        demanderGPS();
+        
+        function demanderGPS() {
+            if (!navigator.geolocation) {
+                console.log('Géolocalisation non supportée');
+                return;
+            }
+            
+            console.log('Demande géolocalisation GPS...');
+            
             navigator.geolocation.getCurrentPosition(
                 function(position) {
-                    const lat = position.coords.latitude;
-                    const lon = position.coords.longitude;
+                    var lat = position.coords.latitude;
+                    var lon = position.coords.longitude;
+                    console.log('Position GPS obtenue:', lat, lon);
                     
                     // Reverse geocoding avec Nominatim
-                    fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=fr`, {
+                    var url = 'https://nominatim.openstreetmap.org/reverse?lat=' + lat + '&lon=' + lon + '&format=json&accept-language=fr&zoom=12';
+                    
+                    fetch(url, {
                         headers: {'User-Agent': 'SarahMiam/3.0'}
                     })
-                    .then(r => r.json())
-                    .then(data => {
-                        const addr = data.address || {};
-                        const ville = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
-                        if (ville && ville.length > 0) {
-                            const params = new URLSearchParams(window.location.search);
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        var addr = data.address || {};
+                        console.log('Adresse complète:', addr);
+                        
+                        // Priorité: city > town > village > municipality > county
+                        var ville = addr.city || addr.town || addr.village || addr.municipality || addr.county || addr.state_district || '';
+                        
+                        console.log('Ville extraite:', ville);
+                        
+                        if (ville && ville.length > 1) {
+                            var params = new URLSearchParams(window.location.search);
                             params.set('ville_gps', ville);
-                            window.location.search = params.toString();
+                            params.set('source_gps', 'gps');  // Marquer comme venant du GPS
+                            window.location.replace(window.location.pathname + '?' + params.toString());
                         }
                     })
-                    .catch(err => console.log('Geocoding error:', err));
+                    .catch(function(err) { 
+                        console.log('Erreur geocoding:', err); 
+                    });
                 },
                 function(error) {
-                    console.log('Géolocalisation refusée ou indisponible:', error.message);
+                    console.log('Erreur GPS:', error.code, error.message);
+                    // Afficher un message à l'utilisateur
+                    if (error.code === 1) {
+                        console.log('Permission refusée - utiliser bouton Changer ville');
+                    }
                 },
                 {
                     enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 300000
+                    timeout: 20000,
+                    maximumAge: 0  // Pas de cache, toujours frais
                 }
             );
         }
@@ -3484,13 +3532,10 @@ PROFIL UTILISATEUR:
 - Nombre de personnes: {st.session_state.nb_personnes}
 """
     
+    # Météo en info secondaire seulement
+    meteo_info = ""
     if meteo:
-        contexte_info += f"""
-MÉTÉO ACTUELLE:
-- Température: {meteo['temp']}°C
-- Conditions: {meteo['description']}
-- Suggestions météo: {', '.join(suggestion_meteo(meteo))}
-"""
+        meteo_info = f"(Info: il fait {meteo['temp']}°C dehors)"
 
     # Liste des recettes disponibles
     recettes_ma = [n for n, r in RECETTES_DETAILLEES.items() if '🇲🇦' in r['pays']]
@@ -3499,26 +3544,42 @@ MÉTÉO ACTUELLE:
     system_prompt = f"""Tu es Sarah, assistante culinaire PROFESSIONNELLE bi-culturelle France-Maroc.
 
 {contexte_info}
+{meteo_info}
 
 RECETTES DISPONIBLES (40 au total):
 🇲🇦 Marocaines: {', '.join(recettes_ma)}
 🇫🇷 Françaises: {', '.join(recettes_fr)}
 
-RÈGLES ABSOLUES:
-1. Utilise UNIQUEMENT le prénom de l'utilisateur (jamais "chéri", "BOBO", "ma belle")
+RÈGLE CRITIQUE - RESPECTE LA DEMANDE DE L'UTILISATEUR:
+- Si l'utilisateur demande une recette SPÉCIFIQUE (ex: "Pastilla", "Couscous", "Blanquette"), 
+  tu DOIS parler de CETTE recette, PAS d'une autre!
+- Ne propose JAMAIS une autre recette si l'utilisateur en a déjà choisi une
+- La météo est une INFO SECONDAIRE, elle ne doit PAS changer le choix de l'utilisateur
+
+AUTRES RÈGLES:
+1. Utilise UNIQUEMENT le prénom (jamais "chéri", "BOBO", "ma belle")
 2. Tutoiement simple et professionnel
 3. Réponses COURTES (2-3 phrases MAX)
-4. Si recette demandée pas dans ta liste → propose des alternatives
-5. Si utilisateur stressé/pressé → suggère recettes rapides et faciles
+4. Si recette demandée pas dans ta liste → propose des alternatives VARIÉES
+5. UNIQUEMENT si l'utilisateur n'a PAS de choix précis, tu peux suggérer selon la météo
 
 DARIJA (pour recettes marocaines uniquement):
-- Utilise des expressions naturelles: Bsaha, Yallah, Mezyan, Sahel
+- Expressions naturelles: Bsaha, Yallah, Mezyan, Sahel
 - Ne traduis jamais les noms des plats traditionnels
 
 EXEMPLES CORRECTS:
-- "Salut! Qu'est-ce qui te ferait plaisir aujourd'hui?"
-- "Super choix! La Harira, c'est parfait par ce temps. Je te guide?"
-- "Je n'ai pas de sushi, mais j'ai de super recettes de poisson: Poisson Vapeur, Tajine..."
+User: "Je veux faire une Pastilla"
+Sarah: "Super choix! La Pastilla, Mezyan! Je te guide pour la préparer?"
+
+User: "Et ça me convient" (après avoir choisi Pastilla)
+Sarah: "Parfait! On commence la Pastilla. Voici les ingrédients..."
+
+User: "Qu'est-ce que je pourrais faire?"
+Sarah: "Hmm, il fait frais... Un bon Tajine ou une Blanquette te réchaufferait!"
+
+EXEMPLE INTERDIT:
+User: "Je veux une Pastilla"
+Sarah: "Par ce froid, je te recommande la Harira..." ❌ NON! L'utilisateur a choisi Pastilla!
 """
 
     try:
@@ -3927,22 +3988,31 @@ def main():
     # CSS
     st.markdown(get_professional_css(), unsafe_allow_html=True)
     
-    # Géolocalisation HTML5
+    # Géolocalisation HTML5 (prioritaire, fonctionne sur mobile)
     st.markdown(obtenir_geolocalisation_html5(), unsafe_allow_html=True)
     
-    # Récupérer ville depuis URL si disponible
+    # Récupérer ville depuis URL si disponible (set par HTML5/GPS)
     try:
         ville_gps = st.query_params.get('ville_gps', None)
-        if ville_gps and ville_gps != st.session_state.ville_utilisateur:
-            st.session_state.ville_utilisateur = ville_gps
-            st.session_state.profil['ville'] = ville_gps
+        source_gps = st.query_params.get('source_gps', None)
+        
+        # Liste des villes de serveurs cloud à ignorer
+        villes_serveurs = ['the dalles', 'dalles', 'council bluffs', 'ashburn', 'san francisco', 'boardman']
+        
+        if ville_gps and ville_gps.lower() not in villes_serveurs:
+            if ville_gps not in ['', 'null', 'undefined', 'France']:
+                if ville_gps != st.session_state.ville_utilisateur:
+                    st.session_state.ville_utilisateur = ville_gps
+                    st.session_state.profil['ville'] = ville_gps
+                    st.session_state.meteo_cache = None
     except:
         pass
     
-    # Si pas de ville, essayer via IP
-    if not st.session_state.ville_utilisateur:
+    # Si pas de ville valide, essayer via IP (mais filtrer les villes US)
+    if not st.session_state.ville_utilisateur or st.session_state.ville_utilisateur in ['', 'France']:
         ville_ip = obtenir_ville_via_ip()
-        if ville_ip:
+        villes_serveurs = ['the dalles', 'dalles', 'council bluffs', 'ashburn', 'san francisco', 'boardman']
+        if ville_ip and ville_ip.lower() not in villes_serveurs and ville_ip not in ['', 'France', 'undefined']:
             st.session_state.ville_utilisateur = ville_ip
             st.session_state.profil['ville'] = ville_ip
     
