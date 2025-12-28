@@ -2634,22 +2634,37 @@ def lire_texte_vocal(texte):
     if not texte or len(texte) < 3:
         return
     
-    # Nettoyer le texte - ENLEVER EMOJIS
+    # Nettoyer le texte - ENLEVER TOUS LES EMOJIS
     import re
-    # Supprimer emojis (unicode emoji ranges)
-    emoji_pattern = re.compile("["
-        u"\U0001F600-\U0001F64F"  # emoticons
-        u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-        u"\U0001F680-\U0001F6FF"  # transport & map symbols
-        u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-        u"\U00002702-\U000027B0"
-        u"\U000024C2-\U0001F251"
-        "]+", flags=re.UNICODE)
-    texte_clean = emoji_pattern.sub('', texte)
+    
+    # Pattern ultra-complet pour TOUS les emojis
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F700-\U0001F77F"  # alchemical symbols
+        "\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
+        "\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
+        "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+        "\U0001FA00-\U0001FA6F"  # Chess Symbols
+        "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
+        "\U00002702-\U000027B0"  # Dingbats
+        "\U000024C2-\U0001F251" 
+        "]+",
+        flags=re.UNICODE
+    )
+    texte_clean = emoji_pattern.sub(' ', texte)  # Remplacer par espace
     
     # Nettoyer caractères spéciaux
-    texte_clean = texte_clean.replace("'", "'").replace('"', ' ').replace('\n', ' ').replace('`', ' ').strip()
-    texte_clean = texte_clean[:300]  # Max 300 caractères
+    texte_clean = texte_clean.replace("'", "'").replace('"', ' ').replace('\n', ' ').replace('`', ' ')
+    
+    # Supprimer espaces multiples
+    texte_clean = re.sub(r'\s+', ' ', texte_clean).strip()
+    
+    # Max 300 caractères
+    texte_clean = texte_clean[:300]
     
     # ID unique
     unique_id = abs(hash(texte_clean + str(datetime.now().timestamp()))) % 100000
